@@ -86,6 +86,8 @@ g++ -g -Wall -o s3_async_test s3_async_test.cpp -lboost_program_options -L../../
 Now that the program is built, its configuration file *bucket.ini* must be
 properly configured. Originally, it looks similar to *bucket.toml*.
 
+###### File *bucket.ini*
+
 ```ini
 name=my-bucket
 region=eu-central-1
