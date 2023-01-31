@@ -1,0 +1,24 @@
+[package]
+name = "rust-s3-async-ffi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = {version = "1.25.0", features = ["macros", "rt-multi-thread"]}
+rust-s3 = "0.32.3"
+ffi-convert = "0.6.0"
+ffi-convert-derive = "0.6.0"
+futures = "0.3.25"
+serde = "1.0.152"
+errno = "0.2.8"
+nix = "0.26.2"
+
+[dev-dependencies]
+config = "0.13.3"
+chrono = "0.4.23"
+
+[lib]
+name = "rusts3asyncffi"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
