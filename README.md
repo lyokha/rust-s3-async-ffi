@@ -22,7 +22,7 @@ Test
 
 There are 2 approaches to test this.
 
-#### 1. Embedded Rust test
+### 1. Embedded Rust test
 
 This approach makes use of an embedded Rust test emulating C program flow.
 To test it in that way, the contents of files *test/data/bucket.toml* and
@@ -82,7 +82,7 @@ test tests::write_and_read_chunked ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
 ```
 
-#### 2. Sample C++ program
+### 2. Sample C++ program
 
 The other approach is a decent use case which involves building a C++ program
 using [boost::asio](https://www.boost.org/doc/libs/release/libs/asio/) with
