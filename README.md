@@ -11,20 +11,20 @@ $ cargo build
 ```
 
 produces a C dynamic library *librusts3asyncffi.so* which can be linked against
-code written in C or C++. Internally, *librusts3asyncffi.so* uses functions
-*put_object_stream()* and *get_object_stream()* from crate *rust-s3* managing
-the server side of a pair of two connected Unix sockets. The client side of the
-pair is supposed for passing to the client side of an application as a raw file
-descriptor.
+code written in C or C++. Internally, *librusts3asyncffi.so* spawns asynchronous
+tasks running functions *put_object_stream()* and *get_object_stream()* from
+crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
+sockets. The client side of a pair is supposed for passing to the client side
+of an application as a raw file descriptor.
 
-Test
-----
+Tests
+-----
 
 There are 2 approaches to test this.
 
-### 1. Embedded Rust test
+### 1. Rust unit test
 
-This approach makes use of an embedded Rust test emulating C program flow.
+This approach makes use of an embedded Rust unit test emulating C program flow.
 To test it in that way, the contents of files *test/data/bucket.toml* and
 *test/data/path.toml* must be properly configured. In the original configuration
 they do not expose any secrets.
@@ -110,7 +110,7 @@ region=eu-central-1
 Like in *bucket.toml*, fields *access_key*, *secret_key*, *security_token*,
 *session_token*, and *expiration* must build proper credentials.
 
-The object's path gets passed into the program as a command-line argument.
+The object's path gets passed into the program in a command-line argument.
 
 ```ShellSession
 $ LD_LIBRARY_PATH=../../target/debug ./s3_async_test -p /path/to/my/object.data
