@@ -10,8 +10,15 @@ Building the project with
 $ cargo build
 ```
 
-produces C dynamic library *librusts3asyncffi.so* which can be linked against
-code written in C or C++.
+produces a C dynamic library *librusts3asyncffi.so* which can be linked against
+code written in C or C++. Internally, *librusts3asyncffi.so* uses functions
+*put_object_stream()* and *get_object_stream()* from crate *rust-s3* managing
+the server side of a pair of two connected Unix sockets. The client side of the
+pair is supposed for passing to the client side of an application as a raw file
+descriptor.
+
+Test
+----
 
 There are 2 approaches to test this.
 
@@ -73,9 +80,9 @@ test tests::write_and_read_chunked ... ok
 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
 ```
 
-The other approach is a proper use case as it involves building a C++ program
-using *boost::asio* with writing/reading S3 objects driven by
-*librusts3asyncffi.so*.
+The other approach is a decent use case which involves building a C++ program
+using [boost::asio](https://www.boost.org/doc/libs/release/libs/asio/) with
+writing and reading S3 objects driven by *librusts3asyncffi.so*.
 
 ```ShellSession
 $ cd test/asio
