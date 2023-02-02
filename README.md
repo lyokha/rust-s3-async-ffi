@@ -24,8 +24,8 @@ There are 2 approaches to test this.
 
 ### 1. Rust unit test
 
-This approach makes use of an embedded Rust unit test emulating C program flow.
-To test it in that way, the contents of files *test/data/bucket.toml* and
+This approach makes use of an embedded Rust unit test emulating a C program
+flow. To test it in that way, the contents of files *test/data/bucket.toml* and
 *test/data/path.toml* must be properly configured. In the original configuration
 they do not expose any secrets.
 

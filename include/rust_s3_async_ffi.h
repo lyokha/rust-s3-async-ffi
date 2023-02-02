@@ -1,6 +1,11 @@
 #ifndef RUST_S3_ASYNC_FFI_H
 #define RUST_S3_ASYNC_FFI_H
 
+#include <sys/types.h>
+
+#define RUST_S3_ASYNC_TASK_NOT_READY (-2)
+
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -24,14 +29,19 @@ extern "C"
         int   fd;
     };
 
-    void* c_init_bucket(const BucketDescr* bucket);
-    void c_close_bucket(void* bucket);
-    void* c_init_tokio_runtime();
-    void c_close_tokio_runtime(void* rt_handle);
-    StreamHandle* c_init_object_stream(
+    void* rust_s3_init_bucket(const BucketDescr* bucket);
+    void rust_s3_close_bucket(void* bucket_handle);
+    void* rust_s3_init_tokio_runtime();
+    void rust_s3_close_tokio_runtime(void* rt_handle);
+    StreamHandle* rust_s3_init_object_stream(
         void* rt_handle, void* bucket_handle, int write, const char* path);
-    void* c_close_stream(void* handle);
-    void* c_get_task_status(void* handle, int* status);
+    void* rust_s3_close_object_stream(void* stream_handle);
+    ssize_t rust_s3_put_object_chunk(
+        void* stream_handle, void* chunk, size_t size, int* errno);
+    ssize_t rust_s3_get_object_chunk(
+        void* stream_handle, void* chunk, size_t size, int* errno);
+    int rust_s3_get_task_status(void* join_handle);
+    void rust_s3_close_task(void* join_handle);
 #ifdef __cplusplus
 }
 #endif

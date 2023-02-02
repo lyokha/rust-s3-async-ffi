@@ -23,6 +23,7 @@
 #include <memory>
 #include <exception>
 #include <stdexcept>
+#include <cassert>
 #include <istream>
 #include <fstream>
 #include <iostream>
@@ -37,6 +38,25 @@ using Buffers = std::vector<boost::asio::const_buffer>;
 using StreamBuffer = boost::asio::streambuf;
 
 
+// Prevent improper usage of rust_s3_close_object_stream()
+void* close_object_stream(void* stream_handle)
+{
+    assert(stream_handle != nullptr);
+    void* res = rust_s3_close_object_stream(stream_handle);
+    stream_handle = nullptr;
+    return res;
+}
+
+
+// Prevent improper usage of rust_s3_close_task()
+void close_task(void* join_handle)
+{
+    assert(join_handle != nullptr);
+    rust_s3_close_task(join_handle);
+    join_handle = nullptr;
+}
+
+
 class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 {
     public:
@@ -44,10 +64,10 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                    void* bucket_handle, const std::string& path) :
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), buf_(16),
-            handle_(c_init_object_stream(tokio_rt_, bucket_handle, 0,
-                                         path_.c_str())),
+            stream_handle_(rust_s3_init_object_stream(
+                tokio_rt_, bucket_handle, 0, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
-                handle_ == nullptr ? -1 : handle_->fd),
+                stream_handle_ == nullptr ? -1 : stream_handle_->fd),
             timer_(io_context_), join_handle_(nullptr)
         {}
 
@@ -94,22 +114,22 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 return;
             }
 
-            join_handle_ = c_close_stream(handle_);
+            join_handle_ = close_object_stream(stream_handle_);
 
-            int status = 0;
-            join_handle_ = c_get_task_status(join_handle_, &status);
+            int status = rust_s3_get_task_status(join_handle_);
 
-            if (join_handle_ == nullptr)
-            {
-                std::cout << "---\nObject read complete, status: " <<
-                        status << std::endl << std::endl;
-            } else
+            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
                 timer_.expires_after(std::chrono::milliseconds(10));
                 timer_.async_wait(
                     boost::bind(&AsyncS3Read::handle_status,
                                 shared_from_this(),
                                 boost::asio::placeholders::error));
+            } else
+            {
+                std::cout << "---\nObject read complete, status: " <<
+                        status << std::endl << std::endl;
+                close_task(join_handle_);
             }
         }
 
@@ -121,20 +141,20 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 return;
             }
 
-            int status = 0;
-            join_handle_ = c_get_task_status(join_handle_, &status);
+            int status = rust_s3_get_task_status(join_handle_);
 
-            if (join_handle_ == nullptr)
-            {
-                std::cout << "---\nObject read complete, status: " <<
-                        status << std::endl << std::endl;
-            } else
+            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
                 timer_.expires_after(std::chrono::milliseconds(10));
                 timer_.async_wait(
                     boost::bind(&AsyncS3Read::handle_status,
                                 shared_from_this(),
                                 boost::asio::placeholders::error));
+            } else
+            {
+                std::cout << "---\nObject read complete, status: " <<
+                        status << std::endl << std::endl;
+                close_task(join_handle_);
             }
         }
 
@@ -144,7 +164,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         void* bucket_handle_;
         std::string path_;
         StreamBuffer buf_;
-        StreamHandle* handle_;
+        StreamHandle* stream_handle_;
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
@@ -160,10 +180,10 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), bufs_(bufs),
             read_back_(read_back),
-            handle_(c_init_object_stream(tokio_rt, bucket_handle_, 1,
-                                         path_.c_str())),
+            stream_handle_(rust_s3_init_object_stream(
+                tokio_rt, bucket_handle_, 1, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
-                handle_ == nullptr ? -1 : handle_->fd),
+                stream_handle_ == nullptr ? -1 : stream_handle_->fd),
             timer_(io_context_), join_handle_(nullptr)
         {}
 
@@ -200,22 +220,22 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
-            join_handle_ = c_close_stream(handle_);
+            join_handle_ = close_object_stream(stream_handle_);
 
-            int status = 0;
-            join_handle_ = c_get_task_status(join_handle_, &status);
+            int status = rust_s3_get_task_status(join_handle_);
 
-            if (join_handle_ == nullptr)
-            {
-                std::cout << "---\nObject write complete, status: " <<
-                        status << std::endl << std::endl;
-            } else
+            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
                 timer_.expires_after(std::chrono::milliseconds(10));
                 timer_.async_wait(
                     boost::bind(&AsyncS3Write::handle_status,
                                 shared_from_this(),
                                 boost::asio::placeholders::error));
+            } else
+            {
+                std::cout << "---\nObject write complete, status: " <<
+                        status << std::endl << std::endl;
+                close_task(join_handle_);
             }
         }
 
@@ -227,13 +247,20 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
-            int status = 0;
-            join_handle_ = c_get_task_status(join_handle_, &status);
+            int status = rust_s3_get_task_status(join_handle_);
 
-            if (join_handle_ == nullptr)
+            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
+            {
+                timer_.expires_after(std::chrono::milliseconds(10));
+                timer_.async_wait(
+                    boost::bind(&AsyncS3Write::handle_status,
+                                shared_from_this(),
+                                boost::asio::placeholders::error));
+            } else
             {
                 std::cout << "---\nObject write complete, status: " <<
                         status << std::endl << std::endl;
+                close_task(join_handle_);
 
                 if (read_back_)
                 {
@@ -245,13 +272,6 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                                     shared_from_this(),
                                     boost::asio::placeholders::error));
                 }
-            } else
-            {
-                timer_.expires_after(std::chrono::milliseconds(10));
-                timer_.async_wait(
-                    boost::bind(&AsyncS3Write::handle_status,
-                                shared_from_this(),
-                                boost::asio::placeholders::error));
             }
         }
 
@@ -277,7 +297,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         std::string path_;
         const Buffers bufs_;
         bool read_back_;
-        StreamHandle* handle_;
+        StreamHandle* stream_handle_;
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
@@ -369,7 +389,8 @@ int main(int argc, char** argv)
                     vm_config.at("expiration").as<std::string>().c_str()
         };
 
-        void* bucket_handle = c_init_bucket(&bucket);
+        // Create and own S3 bucket
+        void* bucket_handle = rust_s3_init_bucket(&bucket);
 
         if (bucket_handle == nullptr)
         {
@@ -389,7 +410,8 @@ int main(int argc, char** argv)
             boost::asio::const_buffer( stime, stime_len )
         };
 
-        void* rt = c_init_tokio_runtime();
+        // Create and own tokio runtime
+        void* rt = rust_s3_init_tokio_runtime();
 
         if (rt == nullptr)
         {
@@ -401,12 +423,14 @@ int main(int argc, char** argv)
                         vm_cmdline.at("path").as<std::string>(),
                         std::move(bufs), true);
 
+        // Writer s3_write will also read the written object
         s3_write->async_write();
 
         io_context.run();
 
-        c_close_tokio_runtime(rt);
-        c_close_bucket(bucket_handle);
+        // Close tokio runtime and S3 bucket
+        rust_s3_close_tokio_runtime(rt);
+        rust_s3_close_bucket(bucket_handle);
     }
     catch (std::exception& e)
     {
