@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 
+#define RUST_S3_ASYNC_TASK_ERROR (-1)
 #define RUST_S3_ASYNC_TASK_NOT_READY (-2)
 
 

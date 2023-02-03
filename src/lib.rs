@@ -197,6 +197,7 @@ pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
 }
 
 
+const ASYNC_TASK_ERROR: c_int = -1;
 const ASYNC_TASK_NOT_READY: c_int = -2;
 
 #[no_mangle]
@@ -208,7 +209,8 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
         match task.now_or_never().unwrap().unwrap() {
             Ok(status) => status as c_int,
             Err(S3Error::Http(status, _body)) => status as c_int,
-            Err(_) => -1
+            // FIXME: here could be some notification about the kind of the error
+            Err(_) => ASYNC_TASK_ERROR
         }
     } else {
         ASYNC_TASK_NOT_READY
@@ -226,19 +228,11 @@ pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
 async fn stream_object(write: bool, bucket: &Bucket, server: &mut UnixStream, path: &str) ->
     S3Result
 {
-    let status = if write {
+    if write {
         bucket.put_object_stream(server, path).await
     } else {
         bucket.get_object_stream(path, server).await
-    };
-
-    let status_code = match status {
-        Ok(status) => status,
-        Err(S3Error::Http(status, _body)) => status,
-        Err(_) => 500
-    };
-
-    Ok(status_code)
+    }
 }
 
 
