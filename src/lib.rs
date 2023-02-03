@@ -45,7 +45,7 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const CBucketDescr) -> *mu
         return std::ptr::null_mut();
     }
 
-    let bucket = unsafe { (*bucket).as_rust() };
+    let bucket = (*bucket).as_rust();
 
     match bucket {
         Ok(bucket) => {
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const CBucketDescr) -> *mu
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_bucket(bucket: *mut Bucket) {
-    unsafe { *Box::from_raw(bucket) };
+    drop(*Box::from_raw(bucket))
 }
 
 
@@ -96,21 +96,11 @@ pub extern "C" fn rust_s3_init_tokio_runtime() -> *const Runtime {
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_tokio_runtime(rt: *mut Runtime) {
-    unsafe { *Box::from_raw(rt) };
+    drop(*Box::from_raw(rt))
 }
 
 
 type StdUnixStream = std::os::unix::net::UnixStream;
-
-fn init_object_stream() -> std::io::Result<(StdUnixStream, StdUnixStream)> {
-    let (client, server) = StdUnixStream::pair()?;
-
-    client.set_nonblocking(true).unwrap();
-    server.set_nonblocking(true).unwrap();
-
-    Ok((client, server))
-}
-
 
 type S3Result = Result<u16, S3Error>;
 
@@ -123,31 +113,28 @@ pub struct StreamHandle {
 }
 
 
-#[no_mangle]
-#[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn rust_s3_init_object_stream(rt: *const Runtime, bucket: *const Bucket,
-    write: c_int, path: *const c_char) -> *mut StreamHandle
+unsafe fn init_object_stream(write: bool, rt: *const Runtime, bucket: *const Bucket,
+    path: *const c_char) -> *mut StreamHandle
 {
-    let pair = init_object_stream();
+    let pair = StdUnixStream::pair();
     if pair.is_err() {
         return std::ptr::null_mut();
     }
 
     let (client, server) = pair.unwrap();
+
+    client.set_nonblocking(true).unwrap();
+    server.set_nonblocking(true).unwrap();
+
     let fd = client.as_raw_fd();
 
     let rt = rt.as_ref().unwrap();
     let bucket = bucket.as_ref().unwrap();
-    let path = unsafe { CStr::from_ptr(path).to_str().unwrap().to_owned() };
+    let path = CStr::from_ptr(path).to_str().unwrap().to_owned();
 
     let join_handle = rt.spawn(async move {
         let mut server = UnixStream::from_std(server).unwrap();
-        let res = if write == 0 {
-            get_object(bucket, &mut server, &path).await
-        } else {
-            put_object(bucket, &mut server, &path).await
-        };
-        res
+        stream_object(write, bucket, &mut server, &path).await
     });
 
     Box::into_raw(Box::new(StreamHandle {
@@ -158,11 +145,29 @@ pub unsafe extern "C" fn rust_s3_init_object_stream(rt: *const Runtime, bucket: 
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket: *const Bucket,
+    path: *const c_char) -> *mut StreamHandle
+{
+    init_object_stream(true, rt, bucket, path)
+}
+
+
+#[no_mangle]
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: *const Bucket,
+    path: *const c_char) -> *mut StreamHandle
+{
+    init_object_stream(false, rt, bucket, path)
+}
+
+
+#[no_mangle]
+#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) ->
     *mut JoinHandle<S3Result>
 {
     let StreamHandle { rt_handle: _rt_handle, join_handle, client: _client, fd: _fd } =
-        unsafe { *Box::from_raw(handle) };
+        *Box::from_raw(handle);
 
     Box::into_raw(Box::new(*join_handle))
 }
@@ -170,10 +175,10 @@ pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) 
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn rust_s3_put_object_chunk(handle: *mut StreamHandle,
+pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
     chunk: *const c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = unsafe { nix::libc::write(handle.as_mut().unwrap().fd, chunk, size) } as ssize_t;
+    let count = nix::libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
     *errno = errno::errno().0;
 
     count
@@ -182,10 +187,10 @@ pub unsafe extern "C" fn rust_s3_put_object_chunk(handle: *mut StreamHandle,
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn rust_s3_get_object_chunk(handle: *mut StreamHandle,
+pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
     chunk: *mut c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = unsafe { nix::libc::read(handle.as_mut().unwrap().fd, chunk, size) } as ssize_t;
+    let count = nix::libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
     *errno = errno::errno().0;
 
     count
@@ -214,24 +219,19 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
-    unsafe { *Box::from_raw(handle) };
+    drop(*Box::from_raw(handle))
 }
 
 
-async fn put_object(bucket: &Bucket, server: &mut UnixStream, path: &str) -> S3Result {
-    let status = bucket.put_object_stream(server, path).await;
-    let status_code = match status {
-        Ok(status) => status,
-        Err(S3Error::Http(status, _body)) => status,
-        Err(_) => 500
+async fn stream_object(write: bool, bucket: &Bucket, server: &mut UnixStream, path: &str) ->
+    S3Result
+{
+    let status = if write {
+        bucket.put_object_stream(server, path).await
+    } else {
+        bucket.get_object_stream(path, server).await
     };
 
-    Ok(status_code)
-}
-
-
-async fn get_object(bucket: &Bucket, server: &mut UnixStream, path: &str) -> S3Result {
-    let status = bucket.get_object_stream(path, server).await;
     let status_code = match status {
         Ok(status) => status,
         Err(S3Error::Http(status, _body)) => status,
@@ -245,9 +245,11 @@ async fn get_object(bucket: &Bucket, server: &mut UnixStream, path: &str) -> S3R
 #[cfg(test)]
 mod tests {
     use crate::{BucketDescr, CBucketDescr, ASYNC_TASK_NOT_READY,
-                rust_s3_init_bucket, rust_s3_close_bucket, rust_s3_init_tokio_runtime,
-                rust_s3_init_object_stream, rust_s3_close_object_stream,
-                rust_s3_put_object_chunk, rust_s3_get_object_chunk,
+                rust_s3_init_bucket, rust_s3_close_bucket,
+                rust_s3_init_tokio_runtime, /* rust_s3_close_tokio_runtime, */
+                rust_s3_write_object_stream, rust_s3_read_object_stream,
+                rust_s3_close_object_stream,
+                rust_s3_write_object_chunk, rust_s3_read_object_chunk,
                 rust_s3_get_task_status, rust_s3_close_task};
     use tokio::time::{sleep, Duration};
     use ffi_convert::CReprOf;
@@ -292,7 +294,7 @@ mod tests {
         let path = std::ffi::CString::new(path.value).unwrap();
 
         // Initialize writing an object
-        let handle = unsafe { rust_s3_init_object_stream(rt, bucket, 1, path.as_ptr()) };
+        let handle = unsafe { rust_s3_write_object_stream(rt, bucket, path.as_ptr()) };
 
         if handle.is_null() {
             panic!("Failed to initialize write object stream");
@@ -314,7 +316,7 @@ mod tests {
                 let mut errno = 0;
 
                 let count = unsafe {
-                    rust_s3_put_object_chunk(handle, chunk.0, chunk.1, &mut errno)
+                    rust_s3_write_object_chunk(handle, chunk.0, chunk.1, &mut errno)
                 };
 
                 if count < 0 {
@@ -357,7 +359,7 @@ mod tests {
         sleep(Duration::from_millis(1000)).await;
 
         // Initialize reading the object just written
-        let handle = unsafe { rust_s3_init_object_stream(rt, bucket, 0, path.as_ptr()) };
+        let handle = unsafe { rust_s3_read_object_stream(rt, bucket, path.as_ptr()) };
 
         if handle.is_null() {
             panic!("Failed to initialize read object stream");
@@ -373,7 +375,7 @@ mod tests {
             let mut errno = 0;
 
             let count = unsafe {
-                rust_s3_get_object_chunk(handle, buf.as_mut_ptr() as *mut c_void, buf.len(),
+                rust_s3_read_object_chunk(handle, buf.as_mut_ptr() as *mut c_void, buf.len(),
                     &mut errno)
             };
 

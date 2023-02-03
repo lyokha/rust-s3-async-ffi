@@ -64,8 +64,8 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                    void* bucket_handle, const std::string& path) :
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), buf_(16),
-            stream_handle_(rust_s3_init_object_stream(
-                tokio_rt_, bucket_handle, 0, path_.c_str())),
+            stream_handle_(rust_s3_read_object_stream(
+                tokio_rt_, bucket_handle, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
             timer_(io_context_), join_handle_(nullptr)
@@ -116,21 +116,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 
             join_handle_ = close_object_stream(stream_handle_);
 
-            int status = rust_s3_get_task_status(join_handle_);
-
-            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
-            {
-                timer_.expires_after(std::chrono::milliseconds(10));
-                timer_.async_wait(
-                    boost::bind(&AsyncS3Read::handle_status,
-                                shared_from_this(),
-                                boost::asio::placeholders::error));
-            } else
-            {
-                std::cout << "---\nObject read complete, status: " <<
-                        status << std::endl << std::endl;
-                close_task(join_handle_);
-            }
+            handle_status(boost::system::error_code());
         }
 
         void handle_status(const boost::system::error_code& error)
@@ -180,8 +166,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), bufs_(bufs),
             read_back_(read_back),
-            stream_handle_(rust_s3_init_object_stream(
-                tokio_rt, bucket_handle_, 1, path_.c_str())),
+            stream_handle_(rust_s3_write_object_stream(
+                tokio_rt, bucket_handle_, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
             timer_(io_context_), join_handle_(nullptr)
@@ -222,21 +208,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 
             join_handle_ = close_object_stream(stream_handle_);
 
-            int status = rust_s3_get_task_status(join_handle_);
-
-            if (status == RUST_S3_ASYNC_TASK_NOT_READY)
-            {
-                timer_.expires_after(std::chrono::milliseconds(10));
-                timer_.async_wait(
-                    boost::bind(&AsyncS3Write::handle_status,
-                                shared_from_this(),
-                                boost::asio::placeholders::error));
-            } else
-            {
-                std::cout << "---\nObject write complete, status: " <<
-                        status << std::endl << std::endl;
-                close_task(join_handle_);
-            }
+            handle_status(boost::system::error_code());
         }
 
         void handle_status(const boost::system::error_code& error)
