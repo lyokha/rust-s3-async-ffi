@@ -101,7 +101,6 @@ pub unsafe extern "C" fn rust_s3_close_tokio_runtime(rt: *mut Runtime) {
 
 
 type StdUnixStream = std::os::unix::net::UnixStream;
-
 type S3Result = Result<u16, S3Error>;
 
 #[repr(C)]
@@ -113,7 +112,7 @@ pub struct StreamHandle {
 }
 
 
-unsafe fn init_object_stream(write: bool, rt: *const Runtime, bucket: *const Bucket,
+unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
     let pair = StdUnixStream::pair();
@@ -134,7 +133,11 @@ unsafe fn init_object_stream(write: bool, rt: *const Runtime, bucket: *const Buc
 
     let join_handle = rt.spawn(async move {
         let mut server = UnixStream::from_std(server).unwrap();
-        stream_object(write, bucket, &mut server, &path).await
+        if write {
+            bucket.put_object_stream(&mut server, path).await
+        } else {
+            bucket.get_object_stream(path, &mut server).await
+        }
     });
 
     Box::into_raw(Box::new(StreamHandle {
@@ -148,7 +151,7 @@ unsafe fn init_object_stream(write: bool, rt: *const Runtime, bucket: *const Buc
 pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
-    init_object_stream(true, rt, bucket, path)
+    spawn_object_stream(true, rt, bucket, path)
 }
 
 
@@ -157,7 +160,7 @@ pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket:
 pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
-    init_object_stream(false, rt, bucket, path)
+    spawn_object_stream(false, rt, bucket, path)
 }
 
 
@@ -222,17 +225,6 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
     drop(*Box::from_raw(handle))
-}
-
-
-async fn stream_object(write: bool, bucket: &Bucket, server: &mut UnixStream, path: &str) ->
-    S3Result
-{
-    if write {
-        bucket.put_object_stream(server, path).await
-    } else {
-        bucket.get_object_stream(path, server).await
-    }
 }
 
 
