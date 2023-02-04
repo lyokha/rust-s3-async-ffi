@@ -1,6 +1,7 @@
 use tokio::runtime::{Builder, Runtime};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
+use tokio::io::AsyncWriteExt;
 use futures::future::FutureExt;
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use nix::libc::{size_t, ssize_t};
+use nix::sys::socket;
 use std::ffi::CStr;
 
 
@@ -134,7 +136,9 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
     let join_handle = rt.spawn(async move {
         let mut server = UnixStream::from_std(server).unwrap();
         if write {
-            bucket.put_object_stream(&mut server, path).await
+            let res = bucket.put_object_stream(&mut server, path).await;
+            server.write_u8(1).await?;
+            res
         } else {
             bucket.get_object_stream(path, &mut server).await
         }
@@ -161,6 +165,21 @@ pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: 
     path: *const c_char) -> *mut StreamHandle
 {
     spawn_object_stream(false, rt, bucket, path)
+}
+
+
+#[no_mangle]
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHandle,
+    errno: *mut c_int) -> c_int
+{
+    let res = match socket::shutdown(handle.as_mut().unwrap().fd, socket::Shutdown::Write) {
+        Ok(()) => 0,
+        Err(_) => -1
+    };
+    *errno = errno::errno().0;
+
+    res
 }
 
 
@@ -209,11 +228,12 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
     let task = handle.as_mut().unwrap();
 
     if task.is_finished() {
-        match task.now_or_never().unwrap().unwrap() {
-            Ok(status) => status as c_int,
-            Err(S3Error::Http(status, _body)) => status as c_int,
-            // FIXME: here could be some notification about the kind of the error
-            Err(_) => ASYNC_TASK_ERROR
+        match task.now_or_never().unwrap() {
+            Ok(Ok(status)) => status as c_int,
+            Ok(Err(S3Error::Http(status, _body))) => status as c_int,
+            // FIXME: there should be some distinction of the kind of the error
+            Ok(Err(_s3_error)) => ASYNC_TASK_ERROR,
+            Err(_join_error) => ASYNC_TASK_ERROR
         }
     } else {
         ASYNC_TASK_NOT_READY
@@ -234,7 +254,7 @@ mod tests {
                 rust_s3_init_bucket, rust_s3_close_bucket,
                 rust_s3_init_tokio_runtime, /* rust_s3_close_tokio_runtime, */
                 rust_s3_write_object_stream, rust_s3_read_object_stream,
-                rust_s3_close_object_stream,
+                rust_s3_write_object_stream_done, rust_s3_close_object_stream,
                 rust_s3_write_object_chunk, rust_s3_read_object_chunk,
                 rust_s3_get_task_status, rust_s3_close_task};
     use tokio::time::{sleep, Duration};
@@ -243,6 +263,7 @@ mod tests {
     use config::{Config, File};
     use serde::Deserialize;
     use chrono::Utc;
+    use std::ffi::CStr;
 
     #[derive(Deserialize)]
     struct Path {
@@ -308,9 +329,11 @@ mod tests {
                 if count < 0 {
                     if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
                         sleep(Duration::from_millis(10)).await;
-                        continue;
+                        continue
+                    } else {
+                        panic!("Failed to write chunks: {:?}",
+                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
                     }
-                    break;
                 }
 
                 let contents = unsafe {
@@ -326,7 +349,45 @@ mod tests {
             }
         }
 
-        // Close writing stream
+        let mut errno = 0;
+
+        // Finalize writing the object
+        let res = unsafe { rust_s3_write_object_stream_done(handle, &mut errno) };
+
+        if res == -1 {
+            panic!("Failed to finalize writing the object: {:?}",
+                   unsafe { CStr::from_ptr(nix::libc::strerror(errno)) });
+        }
+
+        // Notify buffer
+        let mut buf = [0; 1];
+
+        // Read the one-byte notification into the buffer
+        loop {
+            let mut errno = 0;
+
+            let count = unsafe {
+                rust_s3_read_object_chunk(handle, buf.as_mut_ptr() as *mut c_void, buf.len(),
+                    &mut errno)
+            };
+
+            if count <= 0 {
+                if count < 0 {
+                    if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
+                        sleep(Duration::from_millis(10)).await;
+                        continue
+                    } else {
+                        panic!("Failed to read the notify buffer: {:?}",
+                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
+                    }
+                }
+                break
+            };
+
+            assert_eq!(buf[0], 1);
+        }
+
+        // Close write stream
         let handle = unsafe { rust_s3_close_object_stream(handle) };
 
         let mut status;
@@ -366,9 +427,14 @@ mod tests {
             };
 
             if count <= 0 {
-                if count < 0 && (errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK) {
-                    sleep(Duration::from_millis(10)).await;
-                    continue;
+                if count < 0 {
+                    if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
+                        sleep(Duration::from_millis(10)).await;
+                        continue
+                    } else {
+                        panic!("Failed to read chunks: {:?}",
+                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
+                    }
                 }
                 break
             };
@@ -381,7 +447,7 @@ mod tests {
             println!(">>> {:2} bytes read | {contents}", count);
         }
 
-        // Close reading stream
+        // Close read stream
         let handle = unsafe { rust_s3_close_object_stream(handle) };
 
         let mut status;
@@ -404,7 +470,7 @@ mod tests {
         unsafe { rust_s3_close_bucket(bucket) };
 
         // Test that the written and the read data are equal
-        assert!(w_contents == r_contents);
+        assert_eq!(w_contents, r_contents);
 
         Ok(())
     }

@@ -39,11 +39,12 @@ extern "C"
         void* rt_handle, void* bucket_handle, const char* path);
     StreamHandle* rust_s3_read_object_stream(
         void* rt_handle, void* bucket_handle, const char* path);
+    int rust_s3_write_object_stream_done(void* stream_handle, int* err);
     void* rust_s3_close_object_stream(void* stream_handle);
     ssize_t rust_s3_write_object_chunk(
-        void* stream_handle, void* chunk, size_t size, int* errno);
+        void* stream_handle, void* chunk, size_t size, int* err);
     ssize_t rust_s3_read_object_chunk(
-        void* stream_handle, void* chunk, size_t size, int* errno);
+        void* stream_handle, void* chunk, size_t size, int* err);
     int rust_s3_get_task_status(void* join_handle);
     void rust_s3_close_task(void* join_handle);
 

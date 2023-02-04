@@ -24,6 +24,7 @@
 #include <exception>
 #include <stdexcept>
 #include <cassert>
+#include <cstring>
 #include <istream>
 #include <fstream>
 #include <iostream>
@@ -89,7 +90,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             {
                 if (error != boost::asio::error::eof)
                 {
-                    std::cout << "Read error: " << error.message() << std::endl;
+                    std::cerr << "Read error: " << error.message() << std::endl;
                     return;
                 }
 
@@ -123,7 +124,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         {
             if (error)
             {
-                std::cout << "Status error: " << error.message() << std::endl;
+                std::cerr << "Status error: " << error.message() << std::endl;
                 return;
             }
 
@@ -131,6 +132,9 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 
             if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
+                std::cerr << "Read status is not ready " <<
+                        "(supposedly rare case)" << std::endl;
+
                 timer_.expires_after(std::chrono::milliseconds(10));
                 timer_.async_wait(
                     boost::bind(&AsyncS3Read::handle_status,
@@ -165,7 +169,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                      const Buffers&& bufs, bool read_back = false) :
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), bufs_(bufs),
-            read_back_(read_back),
+            read_back_(read_back), notify_buf_(1),
             stream_handle_(rust_s3_write_object_stream(
                 tokio_rt, bucket_handle_, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
@@ -188,7 +192,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         {
             if (error)
             {
-                std::cout << "Write error: " << error.message() << std::endl;
+                std::cerr << "Write error: " << error.message() << std::endl;
                 return;
             }
 
@@ -206,6 +210,32 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
+            int err = 0;
+
+            if (rust_s3_write_object_stream_done(stream_handle_, &err) == -1)
+            {
+                static const size_t buf_size = 128;
+                char buf[buf_size];
+
+                std::cerr << "Failed to finalize writing into the stream: " <<
+                        strerror_r(err, buf, buf_size) << std::endl;
+                return;
+            }
+
+            boost::asio::async_read(fd_, notify_buf_,
+                boost::bind(&AsyncS3Write::handle_notify, shared_from_this(),
+                            boost::asio::placeholders::error,
+                            boost::asio::placeholders::bytes_transferred));
+        }
+
+        void handle_notify(const boost::system::error_code& error, size_t size)
+        {
+            if (error)
+            {
+                std::cerr << "Notify error: " << error.message() << std::endl;
+                return;
+            }
+
             join_handle_ = close_object_stream(stream_handle_);
 
             handle_status(boost::system::error_code());
@@ -215,7 +245,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         {
             if (error)
             {
-                std::cout << "Status error: " << error.message() << std::endl;
+                std::cerr << "Status error: " << error.message() << std::endl;
                 return;
             }
 
@@ -223,6 +253,9 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 
             if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
+                std::cerr << "Write status is not ready " <<
+                        "(supposedly rare case)" << std::endl;
+
                 timer_.expires_after(std::chrono::milliseconds(10));
                 timer_.async_wait(
                     boost::bind(&AsyncS3Write::handle_status,
@@ -251,7 +284,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         {
             if (error)
             {
-                std::cout << "Timer error: " << error.message() << std::endl;
+                std::cerr << "Timer error: " << error.message() << std::endl;
                 return;
             }
 
@@ -269,6 +302,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         std::string path_;
         const Buffers bufs_;
         bool read_back_;
+        StreamBuffer notify_buf_;
         StreamHandle* stream_handle_;
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
