@@ -45,7 +45,7 @@ extern "C"
         void* stream_handle, void* chunk, size_t size, int* err);
     ssize_t rust_s3_read_object_chunk(
         void* stream_handle, void* chunk, size_t size, int* err);
-    int rust_s3_get_task_status(void* join_handle);
+    int rust_s3_get_task_status(void* join_handle, char** msg);
     void rust_s3_close_task(void* join_handle);
 
 #ifdef __cplusplus

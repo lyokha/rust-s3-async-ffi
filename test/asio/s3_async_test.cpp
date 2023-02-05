@@ -128,7 +128,9 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 return;
             }
 
-            int status = rust_s3_get_task_status(join_handle_);
+            char* errmsg = nullptr;
+
+            int status = rust_s3_get_task_status(join_handle_, &errmsg);
 
             if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
@@ -143,7 +145,13 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             } else
             {
                 std::cout << "---\nObject read complete, status: " <<
-                        status << std::endl << std::endl;
+                        status << std::endl;
+                if (errmsg != nullptr) {
+                    std::cout << "Error while reading object: " <<
+                            errmsg << std::endl;
+                }
+                std::cout << std::endl;
+
                 close_task(join_handle_);
             }
         }
@@ -249,7 +257,9 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
-            int status = rust_s3_get_task_status(join_handle_);
+            char* errmsg = nullptr;
+
+            int status = rust_s3_get_task_status(join_handle_, &errmsg);
 
             if (status == RUST_S3_ASYNC_TASK_NOT_READY)
             {
@@ -264,7 +274,13 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             } else
             {
                 std::cout << "---\nObject write complete, status: " <<
-                        status << std::endl << std::endl;
+                        status << std::endl;
+                if (errmsg != nullptr) {
+                    std::cout << "Error while reading object: " <<
+                            errmsg << std::endl;
+                }
+                std::cout << std::endl;
+
                 close_task(join_handle_);
 
                 if (read_back_)

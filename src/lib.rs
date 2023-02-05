@@ -224,20 +224,48 @@ const ASYNC_TASK_NOT_READY: c_int = -2;
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Result>) -> c_int {
+pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Result>,
+    msg: *mut *mut c_char) -> c_int
+{
     let task = handle.as_mut().unwrap();
+
+    *msg = std::ptr::null_mut();
 
     if task.is_finished() {
         match task.now_or_never().unwrap() {
             Ok(Ok(status)) => status as c_int,
-            Ok(Err(S3Error::Http(status, _body))) => status as c_int,
-            // FIXME: there should be some distinction of the kind of the error
-            Ok(Err(_s3_error)) => ASYNC_TASK_ERROR,
-            Err(_join_error) => ASYNC_TASK_ERROR
+            Ok(Err(S3Error::Http(status, body))) => {
+                if !msg.is_null() && !body.is_empty() {
+                    *msg = alloc_msg(&body)
+                };
+                status as c_int
+            },
+            Ok(Err(s3_error)) => {
+                if !msg.is_null() {
+                    *msg = alloc_msg(&s3_error.to_string())
+                };
+                ASYNC_TASK_ERROR
+            },
+            Err(join_error) => {
+                if !msg.is_null() {
+                    *msg = alloc_msg(&join_error.to_string())
+                };
+                ASYNC_TASK_ERROR
+            }
         }
     } else {
         ASYNC_TASK_NOT_READY
     }
+}
+
+
+unsafe fn alloc_msg(msg: &str) -> *mut c_char {
+    let len = msg.len();
+    let buf: *mut c_char = nix::libc::malloc(len + 1) as *mut c_char;
+    nix::libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
+    let last = buf.add(len);
+    *last = '\0' as c_char;
+    buf
 }
 
 
@@ -391,16 +419,25 @@ mod tests {
         let handle = unsafe { rust_s3_close_object_stream(handle) };
 
         let mut status;
+        let mut msg = std::ptr::null_mut();
 
         // Get write status code
-        while { status = unsafe { rust_s3_get_task_status(handle) };
+        while { status = unsafe { rust_s3_get_task_status(handle, &mut msg) };
                 status == ASYNC_TASK_NOT_READY
         } { sleep(Duration::from_millis(10)).await }
 
+        println!("---\nObject write complete, status: {status}");
+
+        // Print write status message and then free it
+        if !msg.is_null() {
+            println!("Error while writing object: {:?}", unsafe { CStr::from_ptr(msg) });
+            unsafe { nix::libc::free(msg as *mut c_void) };
+        }
+
+        println!();
+
         // Close task
         unsafe { rust_s3_close_task(handle) };
-
-        println!("---\nObject write complete, status: {status}\n");
 
         // Wait a moment, otherwise S3 is not so fast and may return nothing or an older object
         sleep(Duration::from_millis(1000)).await;
@@ -451,16 +488,25 @@ mod tests {
         let handle = unsafe { rust_s3_close_object_stream(handle) };
 
         let mut status;
+        let mut msg = std::ptr::null_mut();
 
         // Get read status code
-        while { status = unsafe { rust_s3_get_task_status(handle) };
+        while { status = unsafe { rust_s3_get_task_status(handle, &mut msg) };
                 status == ASYNC_TASK_NOT_READY
         } { sleep(Duration::from_millis(10)).await }
 
+        println!("---\nObject read complete, status: {status}");
+
+        // Print read status message and then free it
+        if !msg.is_null() {
+            println!("Error while reading object: {:?}", unsafe { CStr::from_ptr(msg) });
+            unsafe { nix::libc::free(msg as *mut c_void) };
+        }
+
+        println!();
+
         // Close task
         unsafe { rust_s3_close_task(handle) };
-
-        println!("---\nObject read complete, status: {status}\n");
 
         // Close tokio runtime
         // (skip this because dropping runtimes is not allowed in asynchronous contexts)
