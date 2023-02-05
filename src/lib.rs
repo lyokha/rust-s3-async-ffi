@@ -10,7 +10,7 @@ use ffi_convert::{CReprOf, CDrop, AsRust};
 use serde::Deserialize;
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
-use nix::libc::{size_t, ssize_t};
+use nix::libc::{self, size_t, ssize_t};
 use nix::sys::socket;
 use std::ffi::CStr;
 
@@ -200,7 +200,7 @@ pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) 
 pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
     chunk: *const c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = nix::libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
+    let count = libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
     *errno = errno::errno().0;
 
     count
@@ -212,7 +212,7 @@ pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
 pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
     chunk: *mut c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = nix::libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
+    let count = libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
     *errno = errno::errno().0;
 
     count
@@ -261,8 +261,8 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
 
 unsafe fn alloc_msg(msg: &str) -> *mut c_char {
     let len = msg.len();
-    let buf: *mut c_char = nix::libc::malloc(len + 1) as *mut c_char;
-    nix::libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
+    let buf: *mut c_char = libc::malloc(len + 1) as *mut c_char;
+    libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
     let last = buf.add(len);
     *last = '\0' as c_char;
     buf
@@ -290,8 +290,8 @@ mod tests {
     use std::os::raw::c_void;
     use config::{Config, File};
     use serde::Deserialize;
-    use chrono::Utc;
-    use std::ffi::CStr;
+    use nix::libc;
+    use std::ffi::{CStr, CString};
 
     #[derive(Deserialize)]
     struct Path {
@@ -326,7 +326,7 @@ mod tests {
         // Initialize tokio runtime
         let rt = rust_s3_init_tokio_runtime();
 
-        let path = std::ffi::CString::new(path.value).unwrap();
+        let path = CString::new(path.value).unwrap();
 
         // Initialize writing an object
         let handle = unsafe { rust_s3_write_object_stream(rt, bucket, path.as_ptr()) };
@@ -335,7 +335,7 @@ mod tests {
             panic!("Failed to initialize write object stream");
         }
 
-        let now = Utc::now().to_string();
+        let now = chrono::Utc::now().to_string();
         let now_len = now.len();
 
         let chunks = vec![(b"Chunk 1\n".as_ptr() as *const c_void, 8),
@@ -355,12 +355,12 @@ mod tests {
                 };
 
                 if count < 0 {
-                    if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
+                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
                         sleep(Duration::from_millis(10)).await;
                         continue
                     } else {
                         panic!("Failed to write chunks: {:?}",
-                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
+                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
                     }
                 }
 
@@ -384,7 +384,7 @@ mod tests {
 
         if res == -1 {
             panic!("Failed to finalize writing the object: {:?}",
-                   unsafe { CStr::from_ptr(nix::libc::strerror(errno)) });
+                   unsafe { CStr::from_ptr(libc::strerror(errno)) });
         }
 
         // Notify buffer
@@ -401,12 +401,12 @@ mod tests {
 
             if count <= 0 {
                 if count < 0 {
-                    if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
+                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
                         sleep(Duration::from_millis(10)).await;
                         continue
                     } else {
                         panic!("Failed to read the notify buffer: {:?}",
-                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
+                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
                     }
                 }
                 break
@@ -431,7 +431,7 @@ mod tests {
         // Print write status message and then free it
         if !msg.is_null() {
             println!("Error while writing object: {:?}", unsafe { CStr::from_ptr(msg) });
-            unsafe { nix::libc::free(msg as *mut c_void) };
+            unsafe { libc::free(msg as *mut c_void) };
         }
 
         println!();
@@ -465,12 +465,12 @@ mod tests {
 
             if count <= 0 {
                 if count < 0 {
-                    if errno == nix::libc::EAGAIN || errno == nix::libc::EWOULDBLOCK {
+                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
                         sleep(Duration::from_millis(10)).await;
                         continue
                     } else {
                         panic!("Failed to read chunks: {:?}",
-                               unsafe { CStr::from_ptr(nix::libc::strerror(errno)) })
+                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
                     }
                 }
                 break
@@ -500,7 +500,7 @@ mod tests {
         // Print read status message and then free it
         if !msg.is_null() {
             println!("Error while reading object: {:?}", unsafe { CStr::from_ptr(msg) });
-            unsafe { nix::libc::free(msg as *mut c_void) };
+            unsafe { libc::free(msg as *mut c_void) };
         }
 
         println!();

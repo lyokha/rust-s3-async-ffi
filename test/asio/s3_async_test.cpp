@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
 #include <istream>
 #include <fstream>
 #include <iostream>
@@ -149,6 +150,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 if (errmsg != nullptr) {
                     std::cout << "Error while reading object: " <<
                             errmsg << std::endl;
+                    free(errmsg);
                 }
                 std::cout << std::endl;
 
@@ -278,6 +280,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 if (errmsg != nullptr) {
                     std::cout << "Error while reading object: " <<
                             errmsg << std::endl;
+                    free(errmsg);
                 }
                 std::cout << std::endl;
 
