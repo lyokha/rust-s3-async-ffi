@@ -1,3 +1,16 @@
+//! Asynchronous streaming of AWS S3 objects in C and C++ by means of crate
+//! [rust-s3](https://crates.io/crates/rust-s3) and Unix domain sockets.
+//!
+//! Build produces a C dynamic library *librusts3asyncffi.so* which can be linked against
+//! code written in C or C++. Internally, *librusts3asyncffi.so* spawns asynchronous
+//! tasks running functions [put_object_stream](Bucket::put_object_stream) and
+//! [get_object_stream](Bucket::get_object_stream) from
+//! crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
+//! sockets. The client side of a pair is supposed for passing to the client side
+//! of an application as a raw file descriptor.
+//!
+//! See more details in [README](https://github.com/lyokha/rust-s3-async-ffi#readme).
+
 use tokio::runtime::{Builder, Runtime};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
@@ -15,10 +28,13 @@ use nix::sys::socket;
 use std::ffi::CStr;
 
 
+/// S3 bucket description in terms of C types
+///
+/// The reference implementation can be found in header file *include/rust_s3_async_ffi.h*.
 #[repr(C)]
 #[derive(CReprOf, CDrop, AsRust)]
-#[target_type(BucketDescr)]
-pub struct CBucketDescr {
+#[target_type(BucketDescrImpl)]
+pub struct BucketDescr {
     name: *const c_char,
     region: *const c_char,
     #[nullable] access_key: *const c_char,
@@ -29,7 +45,7 @@ pub struct CBucketDescr {
 }
 
 #[derive(Deserialize)]
-struct BucketDescr {
+struct BucketDescrImpl {
     name: String,
     region: String,
     access_key: Option<String>,
@@ -40,9 +56,15 @@ struct BucketDescr {
 }
 
 
+/// Initialize S3 bucket from a bucket description
+///
+/// Returns a handle to the bucket implementation.
+///
+/// # Safety
+/// The returned handle is owned by the caller and must be dropped after use by calling
+/// function [rust_s3_close_bucket].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
-pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const CBucketDescr) -> *mut Bucket {
+pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut Bucket {
     if bucket.is_null() {
         return std::ptr::null_mut();
     }
@@ -80,13 +102,23 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const CBucketDescr) -> *mu
 }
 
 
+/// Drop S3 bucket handle
+///
+/// # Safety
+/// The handle should have been previously created by calling function [rust_s3_init_bucket].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_bucket(bucket: *mut Bucket) {
     drop(*Box::from_raw(bucket))
 }
 
 
+/// Initialize an instance of tokio runtime
+///
+/// Returns a handle to the created instance.
+///
+/// # Safety
+/// The returned handle is owned by the caller and must be dropped after use by calling
+/// function [rust_s3_close_tokio_runtime].
 #[no_mangle]
 pub extern "C" fn rust_s3_init_tokio_runtime() -> *const Runtime {
     let rt = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -95,8 +127,12 @@ pub extern "C" fn rust_s3_init_tokio_runtime() -> *const Runtime {
 }
 
 
+/// Drop handle to the instance of tokio runtime
+///
+/// # Safety
+/// The handle should have been previously created by calling function
+/// [rust_s3_init_tokio_runtime].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_tokio_runtime(rt: *mut Runtime) {
     drop(*Box::from_raw(rt))
 }
@@ -105,6 +141,10 @@ pub unsafe extern "C" fn rust_s3_close_tokio_runtime(rt: *mut Runtime) {
 type StdUnixStream = std::os::unix::net::UnixStream;
 type S3Result = Result<u16, S3Error>;
 
+
+/// Stream handle description in terms of C types
+///
+/// The reference implementation can be found in header file *include/rust_s3_async_ffi.h*.
 #[repr(C)]
 pub struct StreamHandle {
     rt_handle: *const Runtime,
@@ -150,8 +190,18 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
 }
 
 
+/// Initialize stream for writing S3 object
+///
+/// Spawns an asynchronous task awaiting function [put_object_stream](Bucket::put_object_stream).
+/// Returns a stream handle which must be held by the caller.
+///
+/// # Safety
+/// The caller must ensure validity of handles `rt` and `bucket`.
+/// The returned handle is owned by the caller and must be dropped after use by calling
+/// function [rust_s3_close_object_stream]. The returned handle contains the join handle of
+/// the spawned task which gets decoupled in function `rust_s3_close_object_stream` and must be
+/// finally dropped by calling function [rust_s3_close_task].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
@@ -159,8 +209,18 @@ pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket:
 }
 
 
+/// Initialize stream for reading S3 object
+///
+/// Spawns an asynchronous task awaiting function [get_object_stream](Bucket::get_object_stream).
+/// Returns a stream handle which must be held by the caller.
+///
+/// # Safety
+/// The caller must ensure validity of handles `rt` and `bucket`.
+/// The returned handle is owned by the caller and must be dropped after use by calling
+/// function [rust_s3_close_object_stream]. The returned handle contains the join handle of
+/// the spawned task which gets decoupled in function `rust_s3_close_object_stream` and must be
+/// finally dropped by calling function [rust_s3_close_task].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
@@ -168,8 +228,15 @@ pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: 
 }
 
 
+/// Notify S3 handler that the object has been written
+///
+/// Shuts down the write half of the underlying socket.
+/// Returns `0` on success or `-1` on failure. In the latter case, the value of `errno` is set
+/// appropriately if it was passed as a non-null pointer.
+///
+/// # Safety
+/// The caller must ensure validity of the stream handle `handle`.
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHandle,
     errno: *mut c_int) -> c_int
 {
@@ -177,14 +244,24 @@ pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHan
         Ok(()) => 0,
         Err(_) => -1
     };
-    *errno = errno::errno().0;
+
+    if !errno.is_null() {
+        *errno = errno::errno().0;
+    }
 
     res
 }
 
 
+/// Close S3 object stream
+///
+/// Returns the join handle of the previously spawned task which must be held by the caller.
+///
+/// # Safety
+/// The caller must ensure validity of the stream handle `handle`.
+/// The returned join handle is owned by the caller and must be dropped after use by calling
+/// function [rust_s3_close_task].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) ->
     *mut JoinHandle<S3Result>
 {
@@ -195,35 +272,85 @@ pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) 
 }
 
 
+/// Write a chunk to S3 object stream
+///
+/// Internally, calls function [write](libc::write). Returns the number of written bytes or `-1`
+/// in case of write errors. In the latter case, the value of `errno` is set appropriately.
+/// Note that errors `EAGAIN` and `EWOULDBLOCK` mean that `write` would block on the non-blocking
+/// socket in which case calling this function should be repeated after a small delay.
+///
+/// Notice that this function is not required in advanced asynchronous runtimes like
+/// *boost::asio* because they do not need to operate on such a lower level and may only need to
+/// initialize writing an object by calling function [rust_s3_write_object_stream] and getting a
+/// [StreamHandle] with a file descriptor to write in.
+///
+/// # Safety
+/// The caller must ensure validity of the stream handle `handle`.
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
     chunk: *const c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
     let count = libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
-    *errno = errno::errno().0;
+
+    if !errno.is_null() {
+        *errno = errno::errno().0;
+    }
 
     count
 }
 
 
+/// Read a chunk from S3 object stream
+///
+/// Internally, calls function [read](libc::read). Returns the number of read bytes or `-1`
+/// in case of read errors. In the latter case, the value of `errno` is set appropriately.
+/// Note that errors `EAGAIN` and `EWOULDBLOCK` mean that `read` would block on the non-blocking
+/// socket in which case calling this function should be repeated after a small delay.
+///
+/// Notice that this function is not required in advanced asynchronous runtimes like
+/// *boost::asio* because they do not need to operate on such a lower level and may only need to
+/// initialize reading an object by calling function [rust_s3_read_object_stream] and getting a
+/// [StreamHandle] with a file descriptor to read from.
+///
+/// # Safety
+/// The caller must ensure validity of the stream handle `handle`.
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
     chunk: *mut c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
     let count = libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
-    *errno = errno::errno().0;
+
+    if !errno.is_null() {
+        *errno = errno::errno().0;
+    }
 
     count
 }
 
 
-const ASYNC_TASK_ERROR: c_int = -1;
-const ASYNC_TASK_NOT_READY: c_int = -2;
+/// Asynchronous task has finished with an error
+pub const ASYNC_TASK_ERROR: c_int = -1;
 
+/// Asynchronous task has not yet finished
+pub const ASYNC_TASK_NOT_READY: c_int = -2;
+
+
+/// Get status of the spawned task
+///
+/// The asynchronous tasks spawned by functions [rust_s3_write_object_stream] and
+/// [rust_s3_read_object_stream] must be checked against completion after closing the stream
+/// by function [rust_s3_close_object_stream].
+///
+/// The function returns HTTP status *2xx* when the task has finished successfully, or other
+/// HTTP status, or [ASYNC_TASK_ERROR] on errors. In the two latter cases, `msg` will contain
+/// the address of the error message if it was passed as a non-null pointer.
+/// The function may also return [ASYNC_TASK_NOT_READY] if the task has not finished yet.
+/// In this case, the caller should repeat calling this function after a small delay or close
+/// the task by calling function [rust_s3_close_task].
+///
+/// # Safety
+/// The caller must ensure validity of the join handle `handle`.
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Result>,
     msg: *mut *mut c_char) -> c_int
 {
@@ -266,13 +393,18 @@ unsafe fn alloc_msg(msg: &str) -> *mut c_char {
     let buf = libc::malloc(len + 1) as *mut c_char;
     libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
     let last = buf.add(len);
-    *last = '\0' as c_char;
+    *last = 0;
     buf
 }
 
 
+/// Drop handle to the spawned task
+///
+/// # Safety
+/// The handle should have been previously created by calling functions
+/// [rust_s3_write_object_stream] or [rust_s3_read_object_stream] and then decoupled from
+/// the stream handle in function [rust_s3_close_object_stream].
 #[no_mangle]
-#[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
     drop(*Box::from_raw(handle))
 }
@@ -280,7 +412,7 @@ pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::{BucketDescr, CBucketDescr, ASYNC_TASK_NOT_READY,
+    use crate::{BucketDescr, BucketDescrImpl, ASYNC_TASK_NOT_READY,
                 rust_s3_init_bucket, rust_s3_close_bucket,
                 rust_s3_init_tokio_runtime, /* rust_s3_close_tokio_runtime, */
                 rust_s3_write_object_stream, rust_s3_read_object_stream,
@@ -307,7 +439,7 @@ mod tests {
         // Read bucket configuration
         let source = File::with_name("test/data/bucket.toml");
         let config = Config::builder().add_source(source).build().expect("Bad bucket config");
-        let bucket_descr = config.try_deserialize::<BucketDescr>().expect("Bad bucket config");
+        let bucket = config.try_deserialize::<BucketDescrImpl>().expect("Bad bucket config");
 
         // Read path
         let source = File::with_name("test/data/path.toml");
@@ -318,7 +450,7 @@ mod tests {
 
         // Initialize bucket
         let bucket = unsafe {
-            rust_s3_init_bucket(&CBucketDescr::c_repr_of(bucket_descr).unwrap())
+            rust_s3_init_bucket(&BucketDescr::c_repr_of(bucket).unwrap())
         };
 
         if bucket.is_null() {
