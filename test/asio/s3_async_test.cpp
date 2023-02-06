@@ -59,6 +59,9 @@ void close_task(void* join_handle)
 }
 
 
+class AsyncS3Write;
+
+
 class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 {
     public:
@@ -158,6 +161,12 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             }
         }
 
+    public:
+        void hold_writer_reference(std::shared_ptr<AsyncS3Write> writer)
+        {
+            writer_ = writer;
+        }
+
     private:
         boost::asio::io_context& io_context_;
         void* tokio_rt_;
@@ -168,6 +177,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
+        std::shared_ptr<AsyncS3Write> writer_;
 };
 
 
@@ -311,6 +321,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 std::make_shared<AsyncS3Read>(io_context_, tokio_rt_,
                                               bucket_handle_, path_);
 
+            s3_read->hold_writer_reference(shared_from_this());
             s3_read->async_read();
         }
 

@@ -227,9 +227,11 @@ const ASYNC_TASK_NOT_READY: c_int = -2;
 pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Result>,
     msg: *mut *mut c_char) -> c_int
 {
-    let task = handle.as_mut().unwrap();
+    if !msg.is_null() {
+        *msg = std::ptr::null_mut()
+    }
 
-    *msg = std::ptr::null_mut();
+    let task = handle.as_mut().unwrap();
 
     if task.is_finished() {
         match task.now_or_never().unwrap() {
@@ -261,7 +263,7 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
 
 unsafe fn alloc_msg(msg: &str) -> *mut c_char {
     let len = msg.len();
-    let buf: *mut c_char = libc::malloc(len + 1) as *mut c_char;
+    let buf = libc::malloc(len + 1) as *mut c_char;
     libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
     let last = buf.add(len);
     *last = '\0' as c_char;
