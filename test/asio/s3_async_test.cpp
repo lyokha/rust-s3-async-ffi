@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <atomic>
 #include <memory>
 #include <exception>
 #include <stdexcept>
@@ -61,7 +62,6 @@ void close_task(void* join_handle)
 
 class AsyncS3Write;
 
-
 class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 {
     public:
@@ -73,12 +73,20 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 tokio_rt_, bucket_handle, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
-            timer_(io_context_), join_handle_(nullptr)
+            timer_(io_context_), join_handle_(nullptr), guard_(false)
         {}
 
     public:
         void async_read()
         {
+            // Presumably, AsyncS3Read objects won't be passed between
+            // different threads after creation, hence relaxed memory order
+            if (guard_.exchange(true), std::memory_order_relaxed)
+            {
+                std::cerr << "Read may not run twice or more" << std::endl;
+                return;
+            }
+
             boost::asio::async_read(fd_, buf_,
                 boost::bind(&AsyncS3Read::handle_read, shared_from_this(),
                             boost::asio::placeholders::error,
@@ -95,6 +103,8 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
                 if (error != boost::asio::error::eof)
                 {
                     std::cerr << "Read error: " << error.message() << std::endl;
+                    join_handle_ = close_object_stream(stream_handle_);
+                    close_task(join_handle_);
                     return;
                 }
 
@@ -129,6 +139,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             if (error)
             {
                 std::cerr << "Status error: " << error.message() << std::endl;
+                close_task(join_handle_);
                 return;
             }
 
@@ -164,6 +175,12 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
     public:
         void hold_writer_reference(std::shared_ptr<AsyncS3Write> writer)
         {
+            if (guard_.load(), std::memory_order_relaxed)
+            {
+                std::cerr << "Failed to update writer reference" << std::endl;
+                return;
+            }
+
             writer_ = writer;
         }
 
@@ -178,6 +195,7 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         boost::asio::steady_timer timer_;
         void* join_handle_;
         std::shared_ptr<AsyncS3Write> writer_;
+        std::atomic_bool guard_;
 };
 
 
@@ -194,12 +212,20 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 tokio_rt, bucket_handle_, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
-            timer_(io_context_), join_handle_(nullptr)
+            timer_(io_context_), join_handle_(nullptr), guard_(false)
         {}
 
     public:
         void async_write()
         {
+            // Presumably, AsyncS3Write objects won't be passed between
+            // different threads after creation, hence relaxed memory order
+            if (guard_.exchange(true), std::memory_order_relaxed)
+            {
+                std::cerr << "Write may not run twice or more" << std::endl;
+                return;
+            }
+
             boost::asio::async_write(fd_, bufs_[0],
                 boost::bind(&AsyncS3Write::handle_write, shared_from_this(),
                             0, boost::asio::placeholders::error,
@@ -213,6 +239,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             if (error)
             {
                 std::cerr << "Write error: " << error.message() << std::endl;
+                join_handle_ = close_object_stream(stream_handle_);
+                close_task(join_handle_);
                 return;
             }
 
@@ -239,6 +267,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 
                 std::cerr << "Failed to finalize writing into the stream: " <<
                         strerror_r(err, buf, buf_size) << std::endl;
+                join_handle_ = close_object_stream(stream_handle_);
+                close_task(join_handle_);
                 return;
             }
 
@@ -253,6 +283,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             if (error)
             {
                 std::cerr << "Notify error: " << error.message() << std::endl;
+                join_handle_ = close_object_stream(stream_handle_);
+                close_task(join_handle_);
                 return;
             }
 
@@ -266,6 +298,7 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             if (error)
             {
                 std::cerr << "Status error: " << error.message() << std::endl;
+                close_task(join_handle_);
                 return;
             }
 
@@ -337,11 +370,11 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
+        std::atomic_bool guard_;
 };
 
 
 namespace po = boost::program_options;
-
 
 int main(int argc, char** argv)
 {
