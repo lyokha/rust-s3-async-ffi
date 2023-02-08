@@ -39,6 +39,9 @@ namespace local = boost::asio::local;
 using Buffers = std::vector<boost::asio::const_buffer>;
 using StreamBuffer = boost::asio::streambuf;
 
+using AsyncS3ReadPtr = std::shared_ptr<class AsyncS3Read>;
+using AsyncS3WritePtr = std::shared_ptr<class AsyncS3Write>;
+
 
 // Prevent improper usage of rust_s3_close_object_stream()
 void* close_object_stream(void* stream_handle)
@@ -59,27 +62,24 @@ void close_task(void* join_handle)
 }
 
 
-class AsyncS3Write;
-
 class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 {
-    public:
-        friend class AsyncS3Write;
-
-        friend void async_s3_read(
+    friend void async_s3_read(
                     boost::asio::io_context& io_context, void* tokio_rt,
-                    void* bucket_handle, const std::string& path);
+                    void* bucket_handle, const std::string& path,
+                    AsyncS3WritePtr writer);
 
     private:
         AsyncS3Read(boost::asio::io_context& io_context, void* tokio_rt,
-                    void* bucket_handle, const std::string& path) :
+                    void* bucket_handle, const std::string& path,
+                    AsyncS3WritePtr writer = nullptr) :
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), buf_(16),
             stream_handle_(rust_s3_read_object_stream(
                 tokio_rt_, bucket_handle, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
-            timer_(io_context_), join_handle_(nullptr)
+            timer_(io_context_), join_handle_(nullptr), writer_(writer)
         {}
 
     private:
@@ -172,12 +172,6 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         }
 
     private:
-        void hold_writer_reference(std::shared_ptr<AsyncS3Write> writer)
-        {
-            writer_ = writer;
-        }
-
-    private:
         boost::asio::io_context& io_context_;
         void* tokio_rt_;
         void* bucket_handle_;
@@ -187,14 +181,18 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
-        std::shared_ptr<AsyncS3Write> writer_;
+        AsyncS3WritePtr writer_;
 };
+
+
+void async_s3_read(boost::asio::io_context& io_context, void* tokio_rt,
+                   void* bucket_handle, const std::string& path,
+                   AsyncS3WritePtr writer);
 
 
 class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 {
-    public:
-        friend void async_s3_write(
+    friend void async_s3_write(
                      boost::asio::io_context& io_context, void* tokio_rt,
                      void* bucket_handle, const std::string& path,
                      const Buffers&& bufs, bool read_back);
@@ -341,13 +339,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
-            AsyncS3Read* s3_read_(new AsyncS3Read(
-                io_context_, tokio_rt_, bucket_handle_, path_));
-
-            std::shared_ptr<AsyncS3Read> s3_read(s3_read_);
-
-            s3_read->hold_writer_reference(shared_from_this());
-            s3_read->async_read();
+            async_s3_read(io_context_, tokio_rt_, bucket_handle_, path_,
+                          shared_from_this());
         }
 
     private:
@@ -366,12 +359,13 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 
 
 void async_s3_read(boost::asio::io_context& io_context, void* tokio_rt,
-                   void* bucket_handle, const std::string& path)
+                   void* bucket_handle, const std::string& path,
+                   AsyncS3WritePtr writer = nullptr)
 {
     AsyncS3Read* s3_read_(new AsyncS3Read(
-        io_context, tokio_rt, bucket_handle, path));
+        io_context, tokio_rt, bucket_handle, path, writer));
 
-    std::shared_ptr<AsyncS3Read> s3_read(s3_read_);
+    AsyncS3ReadPtr s3_read(s3_read_);
 
     s3_read->async_read();
 }
@@ -384,7 +378,7 @@ void async_s3_write(boost::asio::io_context& io_context, void* tokio_rt,
     AsyncS3Write* s3_write_(new AsyncS3Write(
         io_context, tokio_rt, bucket_handle, path, std::move(bufs), read_back));
 
-    std::shared_ptr<AsyncS3Write> s3_write(s3_write_);
+    AsyncS3WritePtr s3_write(s3_write_);
 
     s3_write->async_write();
 }
