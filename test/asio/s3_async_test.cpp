@@ -20,7 +20,6 @@
 #include <vector>
 #include <string>
 #include <chrono>
-#include <atomic>
 #include <memory>
 #include <exception>
 #include <stdexcept>
@@ -65,28 +64,27 @@ class AsyncS3Write;
 class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
 {
     public:
+        friend class AsyncS3Write;
+
+        friend void async_s3_read(
+                    boost::asio::io_context& io_context, void* tokio_rt,
+                    void* bucket_handle, const std::string& path);
+
+    private:
         AsyncS3Read(boost::asio::io_context& io_context, void* tokio_rt,
-                   void* bucket_handle, const std::string& path) :
+                    void* bucket_handle, const std::string& path) :
             io_context_(io_context), tokio_rt_(tokio_rt),
             bucket_handle_(bucket_handle), path_(path), buf_(16),
             stream_handle_(rust_s3_read_object_stream(
                 tokio_rt_, bucket_handle, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
-            timer_(io_context_), join_handle_(nullptr), guard_(false)
+            timer_(io_context_), join_handle_(nullptr)
         {}
 
-    public:
+    private:
         void async_read()
         {
-            // Presumably, AsyncS3Read objects won't be passed between
-            // different threads after creation, hence relaxed memory order
-            if (guard_.exchange(true), std::memory_order_relaxed)
-            {
-                std::cerr << "Read may not run twice or more" << std::endl;
-                return;
-            }
-
             boost::asio::async_read(fd_, buf_,
                 boost::bind(&AsyncS3Read::handle_read, shared_from_this(),
                             boost::asio::placeholders::error,
@@ -161,7 +159,8 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             {
                 std::cout << "---\nObject read complete, status: " <<
                         status << std::endl;
-                if (errmsg != nullptr) {
+                if (errmsg != nullptr)
+                {
                     std::cout << "Error while reading object: " <<
                             errmsg << std::endl;
                     free(errmsg);
@@ -172,15 +171,9 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
             }
         }
 
-    public:
+    private:
         void hold_writer_reference(std::shared_ptr<AsyncS3Write> writer)
         {
-            if (guard_.load(), std::memory_order_relaxed)
-            {
-                std::cerr << "Failed to update writer reference" << std::endl;
-                return;
-            }
-
             writer_ = writer;
         }
 
@@ -195,13 +188,18 @@ class AsyncS3Read : public std::enable_shared_from_this<AsyncS3Read>
         boost::asio::steady_timer timer_;
         void* join_handle_;
         std::shared_ptr<AsyncS3Write> writer_;
-        std::atomic_bool guard_;
 };
 
 
 class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
 {
     public:
+        friend void async_s3_write(
+                     boost::asio::io_context& io_context, void* tokio_rt,
+                     void* bucket_handle, const std::string& path,
+                     const Buffers&& bufs, bool read_back);
+
+    private:
         AsyncS3Write(boost::asio::io_context& io_context, void* tokio_rt,
                      void* bucket_handle, const std::string& path,
                      const Buffers&& bufs, bool read_back = false) :
@@ -212,20 +210,12 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 tokio_rt, bucket_handle_, path_.c_str())),
             fd_(io_context_, local::stream_protocol(),
                 stream_handle_ == nullptr ? -1 : stream_handle_->fd),
-            timer_(io_context_), join_handle_(nullptr), guard_(false)
+            timer_(io_context_), join_handle_(nullptr)
         {}
 
-    public:
+    private:
         void async_write()
         {
-            // Presumably, AsyncS3Write objects won't be passed between
-            // different threads after creation, hence relaxed memory order
-            if (guard_.exchange(true), std::memory_order_relaxed)
-            {
-                std::cerr << "Write may not run twice or more" << std::endl;
-                return;
-            }
-
             boost::asio::async_write(fd_, bufs_[0],
                 boost::bind(&AsyncS3Write::handle_write, shared_from_this(),
                             0, boost::asio::placeholders::error,
@@ -320,7 +310,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
             {
                 std::cout << "---\nObject write complete, status: " <<
                         status << std::endl;
-                if (errmsg != nullptr) {
+                if (errmsg != nullptr)
+                {
                     std::cout << "Error while reading object: " <<
                             errmsg << std::endl;
                     free(errmsg);
@@ -350,9 +341,10 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
-            std::shared_ptr<AsyncS3Read> s3_read =
-                std::make_shared<AsyncS3Read>(io_context_, tokio_rt_,
-                                              bucket_handle_, path_);
+            AsyncS3Read* s3_read_(new AsyncS3Read(
+                io_context_, tokio_rt_, bucket_handle_, path_));
+
+            std::shared_ptr<AsyncS3Read> s3_read(s3_read_);
 
             s3_read->hold_writer_reference(shared_from_this());
             s3_read->async_read();
@@ -370,8 +362,32 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
         local::stream_protocol::socket fd_;
         boost::asio::steady_timer timer_;
         void* join_handle_;
-        std::atomic_bool guard_;
 };
+
+
+void async_s3_read(boost::asio::io_context& io_context, void* tokio_rt,
+                   void* bucket_handle, const std::string& path)
+{
+    AsyncS3Read* s3_read_(new AsyncS3Read(
+        io_context, tokio_rt, bucket_handle, path));
+
+    std::shared_ptr<AsyncS3Read> s3_read(s3_read_);
+
+    s3_read->async_read();
+}
+
+
+void async_s3_write(boost::asio::io_context& io_context, void* tokio_rt,
+                    void* bucket_handle, const std::string& path,
+                    const Buffers&& bufs, bool read_back = false)
+{
+    AsyncS3Write* s3_write_(new AsyncS3Write(
+        io_context, tokio_rt, bucket_handle, path, std::move(bufs), read_back));
+
+    std::shared_ptr<AsyncS3Write> s3_write(s3_write_);
+
+    s3_write->async_write();
+}
 
 
 namespace po = boost::program_options;
@@ -473,10 +489,10 @@ int main(int argc, char** argv)
 
         Buffers bufs =
         {
-            boost::asio::const_buffer( "Chunk 1\n", 8 ),
-            boost::asio::const_buffer( "Chunk 2\n", 8 ),
-            boost::asio::const_buffer( stime, stime_len ),
-            boost::asio::const_buffer( stime, stime_len )
+            boost::asio::const_buffer("Chunk 1\n", 8),
+            boost::asio::const_buffer("Chunk 2\n", 8),
+            boost::asio::const_buffer(stime, stime_len),
+            boost::asio::const_buffer(stime, stime_len)
         };
 
         // Create and own tokio runtime
@@ -487,13 +503,10 @@ int main(int argc, char** argv)
             throw std::runtime_error("Failed to initialize tokio runtime");
         }
 
-        std::shared_ptr<AsyncS3Write> s3_write =
-                std::make_shared<AsyncS3Write>(io_context, rt, bucket_handle,
-                        vm_cmdline.at("path").as<std::string>(),
-                        std::move(bufs), true);
-
-        // Writer s3_write will also read the written object
-        s3_write->async_write();
+        // Writer will also read the written object back
+        async_s3_write(io_context, rt, bucket_handle,
+                       vm_cmdline.at("path").as<std::string>(),
+                       std::move(bufs), true);
 
         io_context.run();
 
