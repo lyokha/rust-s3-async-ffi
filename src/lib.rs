@@ -77,7 +77,7 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
 
             let region = bucket.region.parse();
             if region.is_err() {
-                return std::ptr::null_mut();
+                return std::ptr::null_mut()
             }
 
             let credentials = Credentials::new(bucket.access_key.as_deref(),
@@ -86,12 +86,12 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
                                                bucket.session_token.as_deref(),
                                                bucket.expiration.as_deref());
             if credentials.is_err() {
-                return std::ptr::null_mut();
+                return std::ptr::null_mut()
             }
 
             let handle = Bucket::new(&bucket_name, region.unwrap(), credentials.unwrap());
             if handle.is_err() {
-                return std::ptr::null_mut();
+                return std::ptr::null_mut()
             }
 
             Box::into_raw(Box::new(handle.unwrap()))
@@ -159,7 +159,7 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
 {
     let pair = StdUnixStream::pair();
     if pair.is_err() {
-        return std::ptr::null_mut();
+        return std::ptr::null_mut()
     }
 
     let (client, server) = pair.unwrap();
@@ -246,7 +246,7 @@ pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHan
     };
 
     if !errno.is_null() {
-        *errno = errno::errno().0;
+        *errno = errno::errno().0
     }
 
     res
@@ -293,7 +293,7 @@ pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
     let count = libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
 
     if !errno.is_null() {
-        *errno = errno::errno().0;
+        *errno = errno::errno().0
     }
 
     count
@@ -321,7 +321,7 @@ pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
     let count = libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
 
     if !errno.is_null() {
-        *errno = errno::errno().0;
+        *errno = errno::errno().0
     }
 
     count
@@ -432,6 +432,7 @@ mod tests {
         value: String
     }
 
+
     #[tokio::test]
     // test this as 'cargo test -- --nocapture' to see what happens under the hood
     async fn write_and_read_chunked() -> std::io::Result<()> {
@@ -454,7 +455,7 @@ mod tests {
         };
 
         if bucket.is_null() {
-            panic!("Failed to initialize s3 bucket");
+            panic!("Failed to initialize s3 bucket")
         }
 
         // Initialize tokio runtime
@@ -466,7 +467,7 @@ mod tests {
         let handle = unsafe { rust_s3_write_object_stream(rt, bucket, path.as_ptr()) };
 
         if handle.is_null() {
-            panic!("Failed to initialize write object stream");
+            panic!("Failed to initialize write object stream")
         }
 
         let now = chrono::Utc::now().to_string();
@@ -481,21 +482,24 @@ mod tests {
 
         // Write chunks one-by-one
         for chunk in chunks {
+            let mut written = 0;
+
             loop {
                 let mut errno = 0;
 
+                let data = unsafe { chunk.0.add(written) };
                 let count = unsafe {
-                    rust_s3_write_object_chunk(handle, chunk.0, chunk.1, &mut errno)
+                    rust_s3_write_object_chunk(handle, data, chunk.1 - written, &mut errno)
                 };
 
                 if count < 0 {
-                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
-                        sleep(Duration::from_millis(10)).await;
-                        continue
-                    } else {
-                        panic!("Failed to write chunks: {:?}",
-                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
-                    }
+                    handle_errno(errno, Duration::from_millis(10), "write chunks").await;
+                    continue
+                }
+
+                written += count as usize;
+                if written < chunk.1 {
+                    continue
                 }
 
                 let contents = unsafe {
@@ -507,7 +511,7 @@ mod tests {
                 let contents = String::from_utf8_lossy(contents);
                 println!(">>> {:2} bytes written | {contents}", count);
 
-                break;
+                break
             }
         }
 
@@ -518,7 +522,7 @@ mod tests {
 
         if res == -1 {
             panic!("Failed to finalize writing the object: {:?}",
-                   unsafe { CStr::from_ptr(libc::strerror(errno)) });
+                   unsafe { CStr::from_ptr(libc::strerror(errno)) })
         }
 
         // Notify buffer
@@ -529,24 +533,20 @@ mod tests {
             let mut errno = 0;
 
             let count = unsafe {
-                rust_s3_read_object_chunk(handle, buf.as_mut_ptr() as *mut c_void, buf.len(),
-                    &mut errno)
+                rust_s3_read_object_chunk(handle, buf.as_mut_ptr() as *mut c_void,
+                    buf.len(), &mut errno)
             };
 
-            if count <= 0 {
-                if count < 0 {
-                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
-                        sleep(Duration::from_millis(10)).await;
-                        continue
-                    } else {
-                        panic!("Failed to read the notify buffer: {:?}",
-                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
-                    }
-                }
+            if count == 0 {
                 break
-            };
+            }
 
-            assert_eq!(buf[0], 1);
+            if count < 0 {
+                handle_errno(errno, Duration::from_millis(10), "read notify buffer").await;
+                continue
+            }
+
+            assert_eq!(buf[0], 1)
         }
 
         // Close write stream
@@ -565,7 +565,7 @@ mod tests {
         // Print write status message and then free it
         if !msg.is_null() {
             println!("Error while writing object: {:?}", unsafe { CStr::from_ptr(msg) });
-            unsafe { libc::free(msg as *mut c_void) };
+            unsafe { libc::free(msg as *mut c_void) }
         }
 
         println!();
@@ -580,7 +580,7 @@ mod tests {
         let handle = unsafe { rust_s3_read_object_stream(rt, bucket, path.as_ptr()) };
 
         if handle.is_null() {
-            panic!("Failed to initialize read object stream");
+            panic!("Failed to initialize read object stream")
         }
 
         // Read buffer
@@ -588,34 +588,37 @@ mod tests {
 
         let mut r_contents: Vec<u8> = Vec::new();
 
+        let mut read = 0;
+
         // Read chunks one-by-one into the buffer
         loop {
             let mut errno = 0;
 
             let count = unsafe {
-                rust_s3_read_object_chunk(handle, buf.as_mut_ptr() as *mut c_void, buf.len(),
-                    &mut errno)
+                rust_s3_read_object_chunk(handle, buf[read..].as_mut_ptr() as *mut c_void,
+                    buf.len() - read, &mut errno)
             };
 
-            if count <= 0 {
-                if count < 0 {
-                    if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
-                        sleep(Duration::from_millis(10)).await;
-                        continue
-                    } else {
-                        panic!("Failed to read chunks: {:?}",
-                               unsafe { CStr::from_ptr(libc::strerror(errno)) })
-                    }
-                }
+            if count == 0 {
                 break
-            };
+            }
+
+            if count < 0 {
+                handle_errno(errno, Duration::from_millis(10), "read chunks").await;
+                continue
+            }
+
+            read += count as usize;
+            if read == buf.len() {
+                read = 0
+            }
 
             let contents = &buf[..count as usize];
 
             r_contents.extend(contents);
 
             let contents = String::from_utf8_lossy(contents);
-            println!(">>> {:2} bytes read | {contents}", count);
+            println!(">>> {:2} bytes read | {contents}", count)
         }
 
         // Close read stream
@@ -634,7 +637,7 @@ mod tests {
         // Print read status message and then free it
         if !msg.is_null() {
             println!("Error while reading object: {:?}", unsafe { CStr::from_ptr(msg) });
-            unsafe { libc::free(msg as *mut c_void) };
+            unsafe { libc::free(msg as *mut c_void) }
         }
 
         println!();
@@ -653,6 +656,15 @@ mod tests {
         assert_eq!(w_contents, r_contents);
 
         Ok(())
+    }
+
+
+    async fn handle_errno(errno: i32, delay: Duration, op: &str) {
+        if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
+            sleep(delay).await
+        } else if errno != libc::EINTR {
+            panic!("Failed to {op}: {:?}", unsafe { CStr::from_ptr(libc::strerror(errno)) })
+        }
     }
 }
 
