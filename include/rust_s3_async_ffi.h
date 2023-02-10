@@ -21,6 +21,7 @@ extern "C"
         const char* security_token;
         const char* session_token;
         const char* expiration;
+        float       request_timeout;
     };
 
     struct StreamHandle
@@ -30,6 +31,7 @@ extern "C"
         void* client;
         int   fd;
     };
+
 
     void* rust_s3_init_bucket(const BucketDescr* bucket);
     void rust_s3_close_bucket(void* bucket_handle);

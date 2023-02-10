@@ -37,6 +37,8 @@ region = "eu-central-1"
 
 # access_key = "secret"
 # secret_key = "secret"
+
+# request_timeout = 30.0
 ```
 
 Fields *access_key*, *secret_key*, *security_token*, *session_token*, and
@@ -105,6 +107,8 @@ region=eu-central-1
 
 # access_key=secret
 # secret_key=secret
+
+# request_timeout=30.0
 ```
 
 Like in *bucket.toml*, fields *access_key*, *secret_key*, *security_token*,

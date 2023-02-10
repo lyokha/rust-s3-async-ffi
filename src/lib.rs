@@ -15,6 +15,7 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
 use tokio::io::AsyncWriteExt;
+use tokio::time::Duration;
 use futures::future::FutureExt;
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
@@ -22,7 +23,7 @@ use s3::error::S3Error;
 use ffi_convert::{CReprOf, CDrop, AsRust};
 use serde::Deserialize;
 use std::os::fd::AsRawFd;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_int, c_float, c_void};
 use nix::libc::{self, size_t, ssize_t};
 use nix::sys::socket;
 use std::ffi::CStr;
@@ -41,7 +42,8 @@ pub struct BucketDescr {
     #[nullable] secret_key: *const c_char,
     #[nullable] security_token: *const c_char,
     #[nullable] session_token: *const c_char,
-    #[nullable] expiration: *const c_char
+    #[nullable] expiration: *const c_char,
+    request_timeout: c_float
 }
 
 #[derive(Deserialize)]
@@ -52,7 +54,12 @@ struct BucketDescrImpl {
     secret_key: Option<String>,
     security_token: Option<String>,
     session_token: Option<String>,
-    expiration: Option<String>
+    expiration: Option<String>,
+    #[serde(default = "default_request_timeout")] request_timeout: f32
+}
+
+fn default_request_timeout() -> f32 {
+    30.0
 }
 
 
@@ -94,7 +101,10 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
                 return std::ptr::null_mut()
             }
 
-            Box::into_raw(Box::new(handle.unwrap()))
+            let mut handle = handle.unwrap();
+            handle.set_request_timeout(Some(Duration::from_secs_f32(bucket.request_timeout)));
+
+            Box::into_raw(Box::new(handle))
         },
         _ => std::ptr::null_mut()
     }
@@ -493,7 +503,7 @@ mod tests {
                 };
 
                 if count < 0 {
-                    handle_errno(errno, Duration::from_millis(10), "write chunks").await;
+                    handle_stream_error(errno, Duration::from_millis(10), "write chunks").await;
                     continue
                 }
 
@@ -542,7 +552,7 @@ mod tests {
             }
 
             if count < 0 {
-                handle_errno(errno, Duration::from_millis(10), "read notify buffer").await;
+                handle_stream_error(errno, Duration::from_millis(10), "read notify buffer").await;
                 continue
             }
 
@@ -604,7 +614,7 @@ mod tests {
             }
 
             if count < 0 {
-                handle_errno(errno, Duration::from_millis(10), "read chunks").await;
+                handle_stream_error(errno, Duration::from_millis(10), "read chunks").await;
                 continue
             }
 
@@ -659,7 +669,7 @@ mod tests {
     }
 
 
-    async fn handle_errno(errno: i32, delay: Duration, op: &str) {
+    async fn handle_stream_error(errno: i32, delay: Duration, op: &str) {
         if errno == libc::EAGAIN || errno == libc::EWOULDBLOCK {
             sleep(delay).await
         } else if errno != libc::EINTR {

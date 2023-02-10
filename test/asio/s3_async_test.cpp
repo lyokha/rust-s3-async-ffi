@@ -339,6 +339,8 @@ class AsyncS3Write : public std::enable_shared_from_this<AsyncS3Write>
                 return;
             }
 
+            // Note that passing a reference to this is not that important
+            // if the reader does not aim to compare against written bytes
             async_s3_read(io_context_, tokio_rt_, bucket_handle_, path_,
                           shared_from_this());
         }
@@ -402,6 +404,7 @@ int main(int argc, char** argv)
 
     std::string name, region, access_key, secret_key,
             security_token, session_token, expiration;
+    float request_timeout;
 
     po::options_description bucket_options("Bucket options");
     bucket_options.add_options()
@@ -425,7 +428,10 @@ int main(int argc, char** argv)
              "bucket session key")
             ("expiration",
              po::value<std::string>(&expiration)->default_value(""),
-             "bucket expiration");
+             "bucket expiration")
+            ("request_timeout",
+             po::value<float>(&request_timeout)->default_value(30.0),
+             "request timeout in seconds");
 
     try
     {
@@ -434,7 +440,7 @@ int main(int argc, char** argv)
         po::store(po::parse_command_line(argc, argv, cmdline_options),
                   vm_cmdline);
 
-        if(vm_cmdline.count("help") || !vm_cmdline.count("path"))
+        if (vm_cmdline.count("help") || !vm_cmdline.count("path"))
         {
             std::cout << cmdline_options;
             return 0;
@@ -449,8 +455,8 @@ int main(int argc, char** argv)
 
         po::variables_map vm_config;
 
-        store(parse_config_file(ifs, bucket_options), vm_config);
-        notify(vm_config);
+        po::store(po::parse_config_file(ifs, bucket_options), vm_config);
+        po::notify(vm_config);
 
         BucketDescr bucket
         {
@@ -465,7 +471,8 @@ int main(int argc, char** argv)
             vm_config.at("session_token").empty() ? nullptr :
                     vm_config.at("session_token").as<std::string>().c_str(),
             vm_config.at("expiration").empty() ? nullptr :
-                    vm_config.at("expiration").as<std::string>().c_str()
+                    vm_config.at("expiration").as<std::string>().c_str(),
+            vm_config.at("request_timeout").as<float>()
         };
 
         // Create and own S3 bucket
@@ -508,7 +515,7 @@ int main(int argc, char** argv)
         rust_s3_close_tokio_runtime(rt);
         rust_s3_close_bucket(bucket_handle);
     }
-    catch (std::exception& e)
+    catch (const std::exception& e)
     {
         std::cerr << "Exception: " << e.what() << std::endl;
     }
