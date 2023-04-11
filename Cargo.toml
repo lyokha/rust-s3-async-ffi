@@ -1,21 +1,26 @@
 [package]
 name = "rust-s3-async-ffi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
+[features]
+default = ["rust-s3-033"]
+
 [dependencies]
-tokio = {version = "1.25.0", features = ["macros", "rt-multi-thread"]}
-rust-s3 = "0.32.3"
-ffi-convert = "0.6.0"
-ffi-convert-derive = "0.6.0"
-futures = "0.3.25"
-serde = "1.0.152"
-errno = "0.2.8"
+cfg-if = "1.0.0"
+tokio = {version = "1.27.0", features = ["macros", "rt-multi-thread"]}
+rust-s3-033 = {version = "0.33.0", package = "rust-s3", optional = true}
+rust-s3-032 = {version = "0.32.3", package = "rust-s3", optional = true}
+ffi-convert = "0.6.1"
+ffi-convert-derive = "0.6.1"
+futures = "0.3.28"
+serde = "1.0.159"
+errno = "0.3.1"
 nix = "0.26.2"
 
 [dev-dependencies]
 config = "0.13.3"
-chrono = "0.4.23"
+chrono = "0.4.24"
 
 [lib]
 name = "rusts3asyncffi"

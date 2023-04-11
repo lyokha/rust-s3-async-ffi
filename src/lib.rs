@@ -4,12 +4,22 @@
 //! Build produces a C dynamic library *librusts3asyncffi.so* which can be linked against
 //! code written in C or C++. Internally, *librusts3asyncffi.so* spawns asynchronous
 //! tasks running functions [put_object_stream](Bucket::put_object_stream) and
-//! [get_object_stream](Bucket::get_object_stream) from
+//! [get_object_to_writer](Bucket::get_object_to_writer) from
 //! crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
 //! sockets. The client side of a pair is supposed for passing to the client side
 //! of an application as a raw file descriptor.
 //!
 //! See more details in [README](https://github.com/lyokha/rust-s3-async-ffi#readme).
+
+use cfg_if::cfg_if;
+
+cfg_if! {
+    if #[cfg(feature = "rust-s3-032")] {
+        use rust_s3_032 as s3;
+    } else {
+        use rust_s3_033 as s3;
+    }
+}
 
 use tokio::runtime::{Builder, Runtime};
 use tokio::net::UnixStream;
@@ -164,6 +174,23 @@ pub struct StreamHandle {
 }
 
 
+cfg_if! {
+    if #[cfg(feature = "rust-s3-032")] {
+        async fn get_object_stream(bucket: &Bucket, path: &str, server: &mut UnixStream) ->
+            S3Result
+        {
+            bucket.get_object_stream(path, server).await
+        }
+    } else {
+        async fn get_object_stream(bucket: &Bucket, path: &str, server: &mut UnixStream) ->
+            S3Result
+        {
+            bucket.get_object_to_writer(path, server).await
+        }
+    }
+}
+
+
 unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
@@ -190,7 +217,7 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
             server.write_u8(1).await?;
             res
         } else {
-            bucket.get_object_stream(path, &mut server).await
+            get_object_stream(bucket, &path, &mut server).await
         }
     });
 
@@ -221,7 +248,8 @@ pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket:
 
 /// Initialize stream for reading S3 object
 ///
-/// Spawns an asynchronous task awaiting function [get_object_stream](Bucket::get_object_stream).
+/// Spawns an asynchronous task awaiting function
+/// [get_object_to_writer](Bucket::get_object_to_writer).
 /// Returns a stream handle which must be held by the caller.
 ///
 /// # Safety

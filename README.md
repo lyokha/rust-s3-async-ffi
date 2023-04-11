@@ -12,10 +12,17 @@ $ cargo build
 
 produces a C dynamic library *librusts3asyncffi.so* which can be linked against
 code written in C or C++. Internally, *librusts3asyncffi.so* spawns asynchronous
-tasks running functions *put_object_stream()* and *get_object_stream()* from
+tasks running functions *put_object_stream()* and *get_object_to_writer()* from
 crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
 sockets. The client side of a pair is supposed for passing to the client side
 of an application as a raw file descriptor.
+
+The library gets built against the latest *rust-s3-0.33*. To build against the
+older *rust-s3-0.32* (which has a slightly different API), run
+
+```ShellSession
+$ cargo build --features rust-s3-032
+```
 
 Tests
 -----
