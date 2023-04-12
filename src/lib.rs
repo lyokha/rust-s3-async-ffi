@@ -15,9 +15,9 @@ use cfg_if::cfg_if;
 
 cfg_if! {
     if #[cfg(feature = "rust-s3-032")] {
-        use rust_s3_032 as s3;
+        use rust_s3_032 as _s3;
     } else {
-        use rust_s3_033 as s3;
+        use s3 as _s3;
     }
 }
 
@@ -27,9 +27,9 @@ use tokio::task::JoinHandle;
 use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
 use futures::future::FutureExt;
-use s3::bucket::Bucket;
-use s3::creds::Credentials;
-use s3::error::S3Error;
+use _s3::bucket::Bucket;
+use _s3::creds::Credentials;
+use _s3::error::S3Error;
 use ffi_convert::{CReprOf, CDrop, AsRust};
 use serde::Deserialize;
 use std::os::fd::AsRawFd;
