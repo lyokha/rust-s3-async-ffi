@@ -395,11 +395,11 @@ int main(int argc, char** argv)
     po::options_description cmdline_options("Command line options");
     cmdline_options.add_options()
             ("config,c",
-              po::value<std::string>(&config_file)->default_value("bucket.ini"),
-              "bucket config file")
+             po::value<std::string>(&config_file)->default_value("bucket.ini"),
+             "bucket config file")
             ("path,p",
-              po::value<std::string>(&config_file)->required(),
-              "file path in the bucket")
+             po::value<std::string>(&config_file)->required(),
+             "file path in the bucket")
             ("help,h", "display this help message");
 
     std::string name, region, access_key, secret_key,
@@ -409,8 +409,8 @@ int main(int argc, char** argv)
     po::options_description bucket_options("Bucket options");
     bucket_options.add_options()
             ("name",
-              po::value<std::string>(&name)->required(),
-              "bucket name")
+             po::value<std::string>(&name)->required(),
+             "bucket name")
             ("region",
              po::value<std::string>(&region)->required(),
              "bucket region")
