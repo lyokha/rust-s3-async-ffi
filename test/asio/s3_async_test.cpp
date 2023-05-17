@@ -364,10 +364,8 @@ void async_s3_read(boost::asio::io_context& io_context, void* tokio_rt,
                    void* bucket_handle, const std::string& path,
                    AsyncS3WritePtr writer = nullptr)
 {
-    AsyncS3Read* s3_read_(new AsyncS3Read(
+    AsyncS3ReadPtr s3_read(new AsyncS3Read(
         io_context, tokio_rt, bucket_handle, path, writer));
-
-    AsyncS3ReadPtr s3_read(s3_read_);
 
     s3_read->async_read();
 }
@@ -377,10 +375,8 @@ void async_s3_write(boost::asio::io_context& io_context, void* tokio_rt,
                     void* bucket_handle, const std::string& path,
                     const Buffers&& bufs, bool read_back = false)
 {
-    AsyncS3Write* s3_write_(new AsyncS3Write(
+    AsyncS3WritePtr s3_write(new AsyncS3Write(
         io_context, tokio_rt, bucket_handle, path, std::move(bufs), read_back));
-
-    AsyncS3WritePtr s3_write(s3_write_);
 
     s3_write->async_write();
 }
