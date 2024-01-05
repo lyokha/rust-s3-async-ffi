@@ -11,25 +11,15 @@
 //!
 //! See more details in [README](https://github.com/lyokha/rust-s3-async-ffi#readme).
 
-use cfg_if::cfg_if;
-
-cfg_if! {
-    if #[cfg(feature = "rust-s3-032")] {
-        use rust_s3_032 as _s3;
-    } else {
-        use s3 as _s3;
-    }
-}
-
 use tokio::runtime::{Builder, Runtime};
 use tokio::net::UnixStream;
 use tokio::task::JoinHandle;
 use tokio::io::AsyncWriteExt;
 use tokio::time::Duration;
 use futures::future::FutureExt;
-use _s3::bucket::Bucket;
-use _s3::creds::Credentials;
-use _s3::error::S3Error;
+use s3::bucket::Bucket;
+use s3::creds::Credentials;
+use s3::error::S3Error;
 use ffi_convert::{CReprOf, CDrop, AsRust};
 use serde::Deserialize;
 use std::os::fd::AsRawFd;
@@ -174,23 +164,6 @@ pub struct StreamHandle {
 }
 
 
-cfg_if! {
-    if #[cfg(feature = "rust-s3-032")] {
-        async fn get_object_stream(bucket: &Bucket, path: &str, server: &mut UnixStream) ->
-            S3Result
-        {
-            bucket.get_object_stream(path, server).await
-        }
-    } else {
-        async fn get_object_stream(bucket: &Bucket, path: &str, server: &mut UnixStream) ->
-            S3Result
-        {
-            bucket.get_object_to_writer(path, server).await
-        }
-    }
-}
-
-
 unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
@@ -215,9 +188,9 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
         if write {
             let res = bucket.put_object_stream(&mut server, path).await;
             server.write_u8(1).await?;
-            res
+            res.map(|x| x.status_code())
         } else {
-            get_object_stream(bucket, &path, &mut server).await
+            bucket.get_object_to_writer(&path, &mut server).await
         }
     });
 
@@ -401,7 +374,7 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
     if task.is_finished() {
         match task.now_or_never().unwrap() {
             Ok(Ok(status)) => status as c_int,
-            Ok(Err(S3Error::Http(status, body))) => {
+            Ok(Err(S3Error::HttpFailWithBody(status, body))) => {
                 if !msg.is_null() && !body.is_empty() {
                     *msg = alloc_msg(&body)
                 };

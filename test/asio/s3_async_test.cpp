@@ -1,7 +1,7 @@
 /* Build: g++ -o s3async-test s3async.cpp \
  *           -lboost_program_options -L../../target/debug -lrusts3asyncffi
  *
- * Run: LD_LIBRARY_PATH=../../target/debug ./s3async-test -p path
+ * Run: LD_LIBRARY_PATH=../../target/debug ./s3_async_test -p path
  */
 
 #include <boost/asio/io_context.hpp>

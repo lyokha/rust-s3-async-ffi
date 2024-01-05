@@ -1,13 +1,11 @@
 [package]
 name = "rust-s3-async-ffi"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
-cfg-if = "1.0.0"
 tokio = {version = "1.27.0", features = ["macros", "rt-multi-thread"]}
-rust-s3 = "0.33.0"
-rust-s3-032 = {version = "0.32.3", package = "rust-s3", optional = true}
+rust-s3 = "0.34.0-rc4"
 ffi-convert = "0.6.1"
 ffi-convert-derive = "0.6.1"
 futures = "0.3.28"
