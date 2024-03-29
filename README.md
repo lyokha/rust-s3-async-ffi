@@ -37,11 +37,16 @@ they do not expose any secrets.
 name = "my-bucket"
 region = "eu-central-1"
 
+# endpoint = "http://s3.localhost:4566"
+
 # access_key = "secret"
 # secret_key = "secret"
 
 # request_timeout = 30.0
 ```
+
+Field *endpoint* can be enabled for testing with *Localstack* or other AWS S3
+emulators.
 
 Fields *access_key*, *secret_key*, *security_token*, *session_token*, and
 *expiration*, despite the fact that they are optional, must build proper
@@ -107,13 +112,16 @@ properly configured. Originally, it looks similar to *bucket.toml*.
 name=my-bucket
 region=eu-central-1
 
+# endpoint=http://s3.localhost:4566
+
 # access_key=secret
 # secret_key=secret
 
 # request_timeout=30.0
 ```
 
-Like in *bucket.toml*, fields *access_key*, *secret_key*, *security_token*,
+Like in *bucket.toml*, field *endpoint* can be enabled for testing with
+Localstack, fields *access_key*, *secret_key*, *security_token*,
 *session_token*, and *expiration* must build proper credentials.
 
 The object's path gets passed into the program in a command-line argument.

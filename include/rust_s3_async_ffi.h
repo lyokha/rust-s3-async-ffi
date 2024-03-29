@@ -16,6 +16,7 @@ extern "C"
     {
         const char* name;
         const char* region;
+        const char* endpoint;
         const char* access_key;
         const char* secret_key;
         const char* security_token;

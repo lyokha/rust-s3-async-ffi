@@ -398,7 +398,7 @@ int main(int argc, char** argv)
              "file path in the bucket")
             ("help,h", "display this help message");
 
-    std::string name, region, access_key, secret_key,
+    std::string name, region, endpoint, access_key, secret_key,
             security_token, session_token, expiration;
     float request_timeout;
 
@@ -410,6 +410,9 @@ int main(int argc, char** argv)
             ("region",
              po::value<std::string>(&region)->required(),
              "bucket region")
+            ("endpoint",
+             po::value<std::string>(&endpoint)->default_value(""),
+             "bucket endpoint")
             ("access_key",
              po::value<std::string>(&access_key)->default_value(""),
              "bucket access key")
@@ -458,6 +461,8 @@ int main(int argc, char** argv)
         {
             vm_config.at("name").as<std::string>().c_str(),
             vm_config.at("region").as<std::string>().c_str(),
+            vm_config.at("endpoint").empty() ? nullptr :
+                    vm_config.at("endpoint").as<std::string>().c_str(),
             vm_config.at("access_key").empty() ? nullptr :
                     vm_config.at("access_key").as<std::string>().c_str(),
             vm_config.at("secret_key").empty() ? nullptr :

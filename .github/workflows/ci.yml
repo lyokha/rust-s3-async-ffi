@@ -16,9 +16,8 @@ jobs:
         with:
           image-tag: 'latest'
           install-awslocal: 'true'
-      - run: |
-          set -e
-          cargo build
+      - name: Configure bucket
+        run: |
           aws configure --profile default \
               set aws_access_key_id test-rust-s3-async-ffi
           aws configure --profile default \
@@ -26,6 +25,17 @@ jobs:
           aws configure --profile default \
               set default.region eu-central-1
           aws s3 mb s3://my-bucket --endpoint-url http://localhost:4566
-          cargo test -- --nocapture
-          set +e
+      - name: Cargo build
+        run: cargo build
+      - name: Cargo test
+        run: cargo test -- --nocapture
+      - name: Asio test
+        run: |
+          cd test/asio
+          make
+          LD_LIBRARY_PATH=../../target/debug ./s3_async_test \
+              -p /object_asio.data
+          cd -
+      - name: Show bucket content
+        run: aws s3 ls s3://my-bucket --endpoint-url http://localhost:4566
 
