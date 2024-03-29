@@ -28,7 +28,9 @@ jobs:
       - name: Cargo build
         run: cargo build
       - name: Cargo test
-        run: cargo test -- --nocapture
+        run: |
+          cargo test -- --nocapture
+          aws s3 ls s3://my-bucket --endpoint-url http://localhost:4566
       - name: Install Boost libraries
         run: |
           sudo apt-get -y update
@@ -38,8 +40,7 @@ jobs:
           cd test/asio
           make
           LD_LIBRARY_PATH=../../target/debug ./s3_async_test \
-              -p /object_asio.data
+              -p /data/object_asio.data
+          aws s3 ls s3://my-bucket --endpoint-url http://localhost:4566
           cd -
-      - name: Show bucket content
-        run: aws s3 ls s3://my-bucket --endpoint-url http://localhost:4566
 
