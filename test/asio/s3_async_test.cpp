@@ -411,22 +411,22 @@ int main(int argc, char** argv)
              po::value<std::string>(&region)->required(),
              "bucket region")
             ("endpoint",
-             po::value<std::string>(&endpoint)->default_value(""),
+             po::value<std::string>(&endpoint),
              "bucket endpoint")
             ("access_key",
-             po::value<std::string>(&access_key)->default_value(""),
+             po::value<std::string>(&access_key),
              "bucket access key")
             ("secret_key",
-             po::value<std::string>(&secret_key)->default_value(""),
+             po::value<std::string>(&secret_key),
              "bucket secret key")
             ("security_token",
-             po::value<std::string>(&security_token)->default_value(""),
+             po::value<std::string>(&security_token),
              "bucket access key")
             ("session_token",
-             po::value<std::string>(&session_token)->default_value(""),
+             po::value<std::string>(&session_token),
              "bucket session key")
             ("expiration",
-             po::value<std::string>(&expiration)->default_value(""),
+             po::value<std::string>(&expiration),
              "bucket expiration")
             ("request_timeout",
              po::value<float>(&request_timeout)->default_value(30.0),
@@ -445,7 +445,7 @@ int main(int argc, char** argv)
             return 0;
         }
 
-        std::ifstream ifs(vm_cmdline.at("config").as<std::string>());
+        std::ifstream ifs(vm_cmdline["config"].as<std::string>());
 
         if (!ifs)
         {
@@ -457,23 +457,22 @@ int main(int argc, char** argv)
         po::store(po::parse_config_file(ifs, bucket_options), vm_config);
         po::notify(vm_config);
 
+        auto to_optional_string = [](const po::variable_value& k)
+        {
+            return k.empty() ? nullptr : k.as<std::string>().c_str();
+        };
+
         BucketDescr bucket
         {
-            vm_config.at("name").as<std::string>().c_str(),
-            vm_config.at("region").as<std::string>().c_str(),
-            vm_config.at("endpoint").defaulted() ? nullptr :
-                    vm_config.at("endpoint").as<std::string>().c_str(),
-            vm_config.at("access_key").defaulted() ? nullptr :
-                    vm_config.at("access_key").as<std::string>().c_str(),
-            vm_config.at("secret_key").defaulted() ? nullptr :
-                    vm_config.at("secret_key").as<std::string>().c_str(),
-            vm_config.at("security_token").defaulted() ? nullptr :
-                    vm_config.at("security_token").as<std::string>().c_str(),
-            vm_config.at("session_token").defaulted() ? nullptr :
-                    vm_config.at("session_token").as<std::string>().c_str(),
-            vm_config.at("expiration").defaulted() ? nullptr :
-                    vm_config.at("expiration").as<std::string>().c_str(),
-            vm_config.at("request_timeout").as<float>()
+            vm_config["name"].as<std::string>().c_str(),
+            vm_config["region"].as<std::string>().c_str(),
+            to_optional_string(vm_config["endpoint"]),
+            to_optional_string(vm_config["access_key"]),
+            to_optional_string(vm_config["secret_key"]),
+            to_optional_string(vm_config["security_token"]),
+            to_optional_string(vm_config["session_token"]),
+            to_optional_string(vm_config["expiration"]),
+            vm_config["request_timeout"].as<float>()
         };
 
         // Create and own S3 bucket
@@ -507,7 +506,7 @@ int main(int argc, char** argv)
 
         // Writer will also read the written object back
         async_s3_write(io_context, rt, bucket_handle,
-                       vm_cmdline.at("path").as<std::string>(),
+                       vm_cmdline["path"].as<std::string>(),
                        std::move(bufs), true);
 
         io_context.run();
