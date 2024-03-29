@@ -9,9 +9,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install rust toolchain
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Setup localstack
+      - name: Setup Localstack
         uses: LocalStack/setup-localstack@main
         with:
           image-tag: 'latest'
@@ -29,6 +29,10 @@ jobs:
         run: cargo build
       - name: Cargo test
         run: cargo test -- --nocapture
+      - name: Install Boost libraries
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y install libboost-dev
       - name: Asio test
         run: |
           cd test/asio

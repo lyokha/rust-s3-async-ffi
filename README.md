@@ -45,7 +45,7 @@ region = "eu-central-1"
 # request_timeout = 30.0
 ```
 
-Field *endpoint* can be enabled for testing with *Localstack* or other AWS S3
+Field *endpoint* can be enabled for testing with Localstack or other AWS S3
 emulators.
 
 Fields *access_key*, *secret_key*, *security_token*, *session_token*, and
