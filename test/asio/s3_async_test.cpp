@@ -461,17 +461,17 @@ int main(int argc, char** argv)
         {
             vm_config.at("name").as<std::string>().c_str(),
             vm_config.at("region").as<std::string>().c_str(),
-            vm_config.at("endpoint").empty() ? nullptr :
+            vm_config.at("endpoint").defaulted() ? nullptr :
                     vm_config.at("endpoint").as<std::string>().c_str(),
-            vm_config.at("access_key").empty() ? nullptr :
+            vm_config.at("access_key").defaulted() ? nullptr :
                     vm_config.at("access_key").as<std::string>().c_str(),
-            vm_config.at("secret_key").empty() ? nullptr :
+            vm_config.at("secret_key").defaulted() ? nullptr :
                     vm_config.at("secret_key").as<std::string>().c_str(),
-            vm_config.at("security_token").empty() ? nullptr :
+            vm_config.at("security_token").defaulted() ? nullptr :
                     vm_config.at("security_token").as<std::string>().c_str(),
-            vm_config.at("session_token").empty() ? nullptr :
+            vm_config.at("session_token").defaulted() ? nullptr :
                     vm_config.at("session_token").as<std::string>().c_str(),
-            vm_config.at("expiration").empty() ? nullptr :
+            vm_config.at("expiration").defaulted() ? nullptr :
                     vm_config.at("expiration").as<std::string>().c_str(),
             vm_config.at("request_timeout").as<float>()
         };
