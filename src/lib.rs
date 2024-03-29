@@ -20,6 +20,7 @@ use futures::future::FutureExt;
 use s3::bucket::Bucket;
 use s3::creds::Credentials;
 use s3::error::S3Error;
+use s3::Region;
 use ffi_convert::{CReprOf, CDrop, AsRust};
 use serde::Deserialize;
 use std::os::fd::AsRawFd;
@@ -38,6 +39,7 @@ use std::ffi::CStr;
 pub struct BucketDescr {
     name: *const c_char,
     region: *const c_char,
+    #[nullable] endpoint: *const c_char,
     #[nullable] access_key: *const c_char,
     #[nullable] secret_key: *const c_char,
     #[nullable] security_token: *const c_char,
@@ -50,6 +52,7 @@ pub struct BucketDescr {
 struct BucketDescrImpl {
     name: String,
     region: String,
+    endpoint: Option<String>,
     access_key: Option<String>,
     secret_key: Option<String>,
     security_token: Option<String>,
@@ -87,6 +90,12 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
                 return std::ptr::null_mut()
             }
 
+            let region = if let Some(endpoint) = bucket.endpoint {
+                Region::Custom { region: bucket.region, endpoint }
+            } else {
+                region.unwrap()
+            };
+
             let credentials = Credentials::new(bucket.access_key.as_deref(),
                                                bucket.secret_key.as_deref(),
                                                bucket.security_token.as_deref(),
@@ -96,7 +105,7 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
                 return std::ptr::null_mut()
             }
 
-            let handle = Bucket::new(&bucket_name, region.unwrap(), credentials.unwrap());
+            let handle = Bucket::new(&bucket_name, region, credentials.unwrap());
             if handle.is_err() {
                 return std::ptr::null_mut()
             }

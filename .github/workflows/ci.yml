@@ -4,9 +4,28 @@ on:
     branches: [master]
 jobs:
   build:
+    name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup localstack
+        uses: LocalStack/setup-localstack@main
+        with:
+          image-tag: 'latest'
+          install-awslocal: 'true'
+      - run: |
+          set -e
+          cargo build
+          aws configure --profile default \
+              set aws_access_key_id test-rust-s3-async-ffi
+          aws configure --profile default \
+              set aws_secret_access_key test-rust-s3-async-ffi
+          aws configure --profile default \
+              set default.region eu-central-1
+          aws s3 mb s3://my-bucket --endpoint-url http://localhost:4566
+          cargo test -- --nocapture
+          set +e
 
