@@ -32,7 +32,7 @@ jobs:
       - name: Install Boost libraries
         run: |
           sudo apt-get -y update
-          sudo apt-get -y install libboost-dev
+          sudo apt-get -y install libboost-all-dev
       - name: Asio test
         run: |
           cd test/asio
