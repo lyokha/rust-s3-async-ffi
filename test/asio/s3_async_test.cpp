@@ -439,11 +439,13 @@ int main(int argc, char** argv)
         po::store(po::parse_command_line(argc, argv, cmdline_options),
                   vm_cmdline);
 
-        if (vm_cmdline.count("help") || !vm_cmdline.count("path"))
+        if (vm_cmdline.count("help"))
         {
             std::cout << cmdline_options;
             return 0;
         }
+
+        po::notify(vm_cmdline);
 
         std::ifstream ifs(vm_cmdline["config"].as<std::string>());
 
