@@ -113,7 +113,7 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
             let mut handle = handle.unwrap();
             handle.set_request_timeout(Some(Duration::from_secs_f32(bucket.request_timeout)));
 
-            Box::into_raw(Box::new(handle))
+            Box::into_raw(handle)
         },
         _ => std::ptr::null_mut()
     }
