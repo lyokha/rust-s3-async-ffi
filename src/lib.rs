@@ -6,8 +6,9 @@
 //! tasks running functions [put_object_stream](Bucket::put_object_stream) and
 //! [get_object_to_writer](Bucket::get_object_to_writer) from
 //! crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
-//! sockets. The client side of a pair is supposed for passing to the client side
-//! of an application as a raw file descriptor.
+//! sockets. The client side of a pair is supposed to be passed to the client side
+//! of an application as a raw file descriptor and act as an asynchronous event
+//! mediator between the application code and the Rust core of *rust-s3*.
 //!
 //! See more details in [README](https://github.com/lyokha/rust-s3-async-ffi#readme).
 

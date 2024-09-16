@@ -16,8 +16,9 @@ produces a C dynamic library *librusts3asyncffi.so* which can be linked against
 code written in C or C++. Internally, *librusts3asyncffi.so* spawns asynchronous
 tasks running functions *put_object_stream()* and *get_object_to_writer()* from
 crate *rust-s3*. The tasks are driven by associated pairs of connected Unix
-sockets. The client side of a pair is supposed for passing to the client side
-of an application as a raw file descriptor.
+sockets. The client side of a pair is supposed to be passed to the client side
+of an application as a raw file descriptor and act as an asynchronous event
+mediator between the application code and the Rust core of *rust-s3*.
 
 Tests
 -----
