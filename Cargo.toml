@@ -4,17 +4,17 @@ version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-tokio = {version = "1.47.1", features = ["macros", "rt-multi-thread"]}
-rust-s3 = "0.37.0"
+tokio = {version = "1.48.0", features = ["macros", "rt-multi-thread"]}
+rust-s3 = "0.37.1"
 ffi-convert = "0.6.2"
 ffi-convert-derive = "0.6.2"
 futures = "0.3.31"
-serde = "1.0.225"
+serde = "1.0.228"
 errno = "0.3.14"
 nix = {version = "0.30.1", features = ["socket"]}
 
 [dev-dependencies]
-config = "0.15.16"
+config = "0.15.19"
 chrono = "0.4.42"
 
 [lib]
