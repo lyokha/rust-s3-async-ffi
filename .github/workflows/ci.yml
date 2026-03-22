@@ -16,8 +16,7 @@ jobs:
         with:
           image-tag: 'latest'
           install-awslocal: 'true'
-        env:
-          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
+          use-pro: 'false'
       - name: Configure bucket
         run: |
           aws configure --profile default \
