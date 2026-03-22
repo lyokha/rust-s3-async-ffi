@@ -74,13 +74,13 @@ fn default_request_timeout() -> f32 {
 /// # Safety
 /// The returned handle is owned by the caller and must be dropped after use by calling
 /// function [rust_s3_close_bucket].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut Bucket {
     if bucket.is_null() {
         return std::ptr::null_mut();
     }
 
-    let bucket = (*bucket).as_rust();
+    let bucket = unsafe { (*bucket).as_rust() };
 
     match bucket {
         Ok(bucket) => {
@@ -126,9 +126,9 @@ pub unsafe extern "C" fn rust_s3_init_bucket(bucket: *const BucketDescr) -> *mut
 ///
 /// # Safety
 /// The handle should have been previously created by calling function [rust_s3_init_bucket].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_close_bucket(bucket: *mut Bucket) {
-    drop(*Box::from_raw(bucket))
+    unsafe { drop(*Box::from_raw(bucket)) }
 }
 
 
@@ -139,7 +139,7 @@ pub unsafe extern "C" fn rust_s3_close_bucket(bucket: *mut Bucket) {
 /// # Safety
 /// The returned handle is owned by the caller and must be dropped after use by calling
 /// function [rust_s3_close_tokio_runtime].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_s3_init_tokio_runtime() -> *const Runtime {
     let rt = Builder::new_multi_thread().enable_all().build().unwrap();
 
@@ -152,9 +152,9 @@ pub extern "C" fn rust_s3_init_tokio_runtime() -> *const Runtime {
 /// # Safety
 /// The handle should have been previously created by calling function
 /// [rust_s3_init_tokio_runtime].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_close_tokio_runtime(rt: *mut Runtime) {
-    drop(*Box::from_raw(rt))
+    unsafe { drop(*Box::from_raw(rt)) }
 }
 
 
@@ -189,9 +189,9 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
 
     let fd = client.as_raw_fd();
 
-    let rt = rt.as_ref().unwrap();
-    let bucket = bucket.as_ref().unwrap();
-    let path = CStr::from_ptr(path).to_str().unwrap().to_owned();
+    let rt = unsafe { rt.as_ref().unwrap() };
+    let bucket = unsafe { bucket.as_ref().unwrap() };
+    let path = unsafe { CStr::from_ptr(path).to_str().unwrap().to_owned() };
 
     let join_handle = rt.spawn(async move {
         let mut server = UnixStream::from_std(server).unwrap();
@@ -221,11 +221,11 @@ unsafe fn spawn_object_stream(write: bool, rt: *const Runtime, bucket: *const Bu
 /// function [rust_s3_close_object_stream]. The returned handle contains the join handle of
 /// the spawned task which gets decoupled in function `rust_s3_close_object_stream` and must be
 /// finally dropped by calling function [rust_s3_close_task].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
-    spawn_object_stream(true, rt, bucket, path)
+    unsafe { spawn_object_stream(true, rt, bucket, path) }
 }
 
 
@@ -241,11 +241,11 @@ pub unsafe extern "C" fn rust_s3_write_object_stream(rt: *const Runtime, bucket:
 /// function [rust_s3_close_object_stream]. The returned handle contains the join handle of
 /// the spawned task which gets decoupled in function `rust_s3_close_object_stream` and must be
 /// finally dropped by calling function [rust_s3_close_task].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: *const Bucket,
     path: *const c_char) -> *mut StreamHandle
 {
-    spawn_object_stream(false, rt, bucket, path)
+    unsafe { spawn_object_stream(false, rt, bucket, path) }
 }
 
 
@@ -257,17 +257,18 @@ pub unsafe extern "C" fn rust_s3_read_object_stream(rt: *const Runtime, bucket: 
 ///
 /// # Safety
 /// The caller must ensure validity of the stream handle `handle`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHandle,
     errno: *mut c_int) -> c_int
 {
-    let res = match socket::shutdown(handle.as_mut().unwrap().fd, socket::Shutdown::Write) {
+    let res = match socket::shutdown(unsafe { handle.as_mut().unwrap().fd },
+                                     socket::Shutdown::Write) {
         Ok(()) => 0,
         Err(_) => -1
     };
 
     if !errno.is_null() {
-        *errno = errno::errno().0
+        unsafe { *errno = errno::errno().0 }
     }
 
     res
@@ -282,12 +283,12 @@ pub unsafe extern "C" fn rust_s3_write_object_stream_done(handle: *mut StreamHan
 /// The caller must ensure validity of the stream handle `handle`.
 /// The returned join handle is owned by the caller and must be dropped after use by calling
 /// function [rust_s3_close_task].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) ->
     *mut JoinHandle<S3Result>
 {
     let StreamHandle { rt_handle: _rt_handle, join_handle, client: _client, fd: _fd } =
-        *Box::from_raw(handle);
+        unsafe { *Box::from_raw(handle) };
 
     Box::into_raw(Box::new(*join_handle))
 }
@@ -307,14 +308,14 @@ pub unsafe extern "C" fn rust_s3_close_object_stream(handle: *mut StreamHandle) 
 ///
 /// # Safety
 /// The caller must ensure validity of the stream handle `handle`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
     chunk: *const c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
+    let count = unsafe { libc::write(handle.as_mut().unwrap().fd, chunk, size) as ssize_t };
 
     if !errno.is_null() {
-        *errno = errno::errno().0
+        unsafe { *errno = errno::errno().0 }
     }
 
     count
@@ -335,14 +336,14 @@ pub unsafe extern "C" fn rust_s3_write_object_chunk(handle: *mut StreamHandle,
 ///
 /// # Safety
 /// The caller must ensure validity of the stream handle `handle`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_read_object_chunk(handle: *mut StreamHandle,
     chunk: *mut c_void, size: size_t, errno : *mut c_int) -> ssize_t
 {
-    let count = libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t;
+    let count = unsafe { libc::read(handle.as_mut().unwrap().fd, chunk, size) as ssize_t };
 
     if !errno.is_null() {
-        *errno = errno::errno().0
+        unsafe { *errno = errno::errno().0 }
     }
 
     count
@@ -371,34 +372,34 @@ pub const ASYNC_TASK_NOT_READY: c_int = -2;
 ///
 /// # Safety
 /// The caller must ensure validity of the join handle `handle`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Result>,
     msg: *mut *mut c_char) -> c_int
 {
     if !msg.is_null() {
-        *msg = std::ptr::null_mut()
+        unsafe { *msg = std::ptr::null_mut() }
     }
 
-    let task = handle.as_mut().unwrap();
+    let task = unsafe { handle.as_mut().unwrap() };
 
     if task.is_finished() {
         match task.now_or_never().unwrap() {
             Ok(Ok(status)) => status as c_int,
             Ok(Err(S3Error::HttpFailWithBody(status, body))) => {
                 if !msg.is_null() && !body.is_empty() {
-                    *msg = alloc_msg(&body)
+                    unsafe { *msg = alloc_msg(&body) }
                 };
                 status as c_int
             },
             Ok(Err(s3_error)) => {
                 if !msg.is_null() {
-                    *msg = alloc_msg(&s3_error.to_string())
+                    unsafe { *msg = alloc_msg(&s3_error.to_string()) }
                 };
                 ASYNC_TASK_ERROR
             },
             Err(join_error) => {
                 if !msg.is_null() {
-                    *msg = alloc_msg(&join_error.to_string())
+                    unsafe { *msg = alloc_msg(&join_error.to_string()) }
                 };
                 ASYNC_TASK_ERROR
             }
@@ -411,10 +412,12 @@ pub unsafe extern "C" fn rust_s3_get_task_status(handle: *mut JoinHandle<S3Resul
 
 unsafe fn alloc_msg(msg: &str) -> *mut c_char {
     let len = msg.len();
-    let buf = libc::malloc(len + 1) as *mut c_char;
-    libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
-    let last = buf.add(len);
-    *last = 0;
+    let buf = unsafe { libc::malloc(len + 1) as *mut c_char };
+    unsafe {
+        libc::memcpy(buf as *mut c_void, msg.as_bytes().as_ptr() as *const c_void, len);
+        let last = buf.add(len);
+        *last = 0;
+    }
     buf
 }
 
@@ -425,9 +428,9 @@ unsafe fn alloc_msg(msg: &str) -> *mut c_char {
 /// The handle should have been previously created by calling functions
 /// [rust_s3_write_object_stream] or [rust_s3_read_object_stream] and then decoupled from
 /// the stream handle in function [rust_s3_close_object_stream].
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_s3_close_task(handle: *mut JoinHandle<S3Result>) {
-    drop(*Box::from_raw(handle))
+    unsafe { drop(*Box::from_raw(handle)) }
 }
 
 
