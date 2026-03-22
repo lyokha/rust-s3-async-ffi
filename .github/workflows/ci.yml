@@ -12,10 +12,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Setup Localstack
-        uses: LocalStack/setup-localstack@main
+        uses: LocalStack/setup-localstack@v0.3.0
         with:
           image-tag: 'latest'
           install-awslocal: 'true'
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
       - name: Configure bucket
         run: |
           aws configure --profile default \
