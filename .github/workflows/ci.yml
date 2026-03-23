@@ -17,6 +17,8 @@ jobs:
           image-tag: 'latest'
           install-awslocal: 'true'
           use-pro: 'false'
+        env:
+          LOCALSTACK_ACKNOWLEDGE_ACCOUNT_REQUIREMENT: '1'
       - name: Configure bucket
         run: |
           aws configure --profile default \
