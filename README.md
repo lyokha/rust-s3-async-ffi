@@ -2,7 +2,7 @@ rust-s3-async-ffi
 =================
 
 [![Build Status](https://github.com/lyokha/rust-s3-async-ffi/workflows/CI/badge.svg)](https://github.com/lyokha/rust-s3-async-ffi/actions?query=workflow%3ACI)
-[![crates.io](https://img.shields.io/crates/v/rust-s3-async-ffi)](https://crates.io/crates/rust-s3-async-ffi)
+[![crates.io](https://img.shields.io/crates/v/rust-s3-async-ffi?label=crates.io%20%7C%20rust-s3-async-ffi&logo=rust&logoColor=%23F58000)](https://crates.io/crates/rust-s3-async-ffi)
 
 Asynchronous streaming of AWS S3 objects in C and C++ by means of crate
 [rust-s3](https://crates.io/crates/rust-s3) and Unix domain sockets.
