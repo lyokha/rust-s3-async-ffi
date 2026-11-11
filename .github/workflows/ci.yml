@@ -16,14 +16,10 @@ jobs:
       - name: Wait for MiniStack to be ready
         run: |
           echo 'Waiting for MiniStack...'
-          curl --connect-timeout 2 \
-               --max-time 5 \
-               --retry 10 \
-               --retry-delay 2 \
-               --retry-connrefused \
-               -s -o /dev/null \
-               -w "MiniStack health status: %{http_code}\n" \
-               http://localhost:4566/_ministack/health
+          for i in $(seq 1 10); do
+            curl -s http://localhost:4566/_ministack/health && break
+            sleep 2
+          done
       - name: Configure bucket
         run: |
           aws configure --profile default \
