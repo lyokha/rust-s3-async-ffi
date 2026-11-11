@@ -8,17 +8,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      - name: Setup Localstack
-        uses: LocalStack/setup-localstack@v0.3.0
-        with:
-          image-tag: 'latest'
-          install-awslocal: 'true'
-          use-pro: 'false'
-        env:
-          LOCALSTACK_ACKNOWLEDGE_ACCOUNT_REQUIREMENT: '1'
+      - name: Start MiniStack
+        run: docker run -d -p 4566:4566 ministackorg/ministack
+      - name: Wait for MiniStack to be ready
+        run: |
+          echo 'Waiting for MiniStack...'
+          curl --connect-timeout 2 \
+               --max-time 5 \
+               --retry 10 \
+               --retry-delay 2 \
+               --retry-connrefused \
+               -s -o /dev/null \
+               -w "MiniStack health status: %{http_code}\n" \
+               http://localhost:4566/_ministack/health
       - name: Configure bucket
         run: |
           aws configure --profile default \
